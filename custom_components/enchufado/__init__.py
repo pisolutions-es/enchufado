@@ -31,7 +31,7 @@ async def async_setup_entry(hass, entry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     _setup_services(hass, entry)
-    hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
+    _import_task(hass, entry)
     return True
 
 
@@ -40,19 +40,47 @@ def _ensure_data_dir():
         makedirs(EnchufadoCoordinator.user_files_path)
 
 
+def _import_task(hass, entry, force: bool = False) -> None:
+    """Start an import unless one is already running for this entry.
+
+    The flag lives in entry data so concurrent triggers (scheduled, service,
+    setup) no longer stack duplicate import chains that double API calls and
+    race on the CSV/statistics writes. The reset runs in a done-callback so a
+    raised import error cannot leave the flag stuck.
+    """
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if data is None:
+        return
+    if data.get("import_running"):
+        _LOGGER.debug("import already running, skipping overlapping trigger (force=%s)", force)
+        return
+    data["import_running"] = True
+
+    async def _run() -> None:
+        await EnchufadoCoordinator.import_energy_data(hass, force)
+
+    task = entry.async_create_task(hass, _run(), "enchufado import")
+    task.add_done_callback(lambda _: data.pop("import_running", None))
+
+
 def _setup_services(hass, entry) -> None:
     async def _handle_import(call):
-        hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
+        _import_task(hass, entry)
 
     async def _handle_force_import(call):
-        hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass, True))
+        _import_task(hass, entry, force=True)
 
     async def _handle_reprocess(call):
-        hass.async_create_task(EnchufadoCoordinator.reprocess_energy_data(hass))
+        entry.async_create_task(hass, EnchufadoCoordinator.reprocess_energy_data(hass), "enchufado reprocess")
 
     async def _handle_scheduled_import(now):
+        # The sleep is a task tracked by the entry so an unload/reload before
+        # the jitter elapses cancels it instead of leaking a timer + import.
+        entry.async_create_task(hass, _delayed_import(), "enchufado scheduled import")
+
+    async def _delayed_import() -> None:
         await asyncio.sleep(randint(0, 3600))
-        hass.async_create_task(EnchufadoCoordinator.import_energy_data(hass))
+        _import_task(hass, entry)
 
     hass.services.async_register(DOMAIN, "import_energy_data", _handle_import)
     hass.services.async_register(DOMAIN, "force_import_energy_data", _handle_force_import)

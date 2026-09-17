@@ -81,3 +81,88 @@ async def test_number_entity_added(recorder_mock, hass, monkeypatch):
     found = hass.states.get(entity_id) or hass.states.get("number.enchufado_facturas_a_mostrar")
     assert found is not None
     assert float(found.state) == 5.0
+
+
+async def test_overlapping_import_triggers_are_coalesced(recorder_mock, hass, monkeypatch):
+    """Two triggers while an import is running must not stack duplicate imports."""
+    await _mock_apis(monkeypatch)
+    entry = MockConfigEntry(domain=DOMAIN, data=_entry_data(), version=1)
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    from custom_components.enchufado import coordinator
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def slow_import(hass_, force=False):
+        calls.append(force)
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(coordinator.EnchufadoCoordinator, "import_energy_data", slow_import)
+
+    async def _pump_until(condition, iterations=100):
+        for _ in range(iterations):
+            await asyncio.sleep(0)
+            if condition():
+                return True
+        return False
+
+    hass.async_create_task(
+        hass.services.async_call(DOMAIN, "import_energy_data", blocking=False)
+    )
+    assert await _pump_until(started.is_set), "first import never started"
+
+    # second trigger while the first import is still in flight
+    hass.async_create_task(
+        hass.services.async_call(DOMAIN, "import_energy_data", blocking=False)
+    )
+    assert await _pump_until(lambda: len(calls) > 0 or calls == [False])
+    assert calls == [False]  # the overlapping trigger was coalesced away
+
+    release.set()
+    await hass.async_block_till_done()  # first import finishes, flag resets
+    # a later trigger runs again
+    await hass.services.async_call(DOMAIN, "force_import_energy_data", blocking=True)
+    await hass.async_block_till_done()
+    assert calls == [False, True]
+
+
+async def test_scheduled_import_sleep_cancelled_on_unload(recorder_mock, hass, monkeypatch):
+    """Unloading cancels the pending jittered scheduled import instead of leaking it."""
+    await _mock_apis(monkeypatch)
+    entry = MockConfigEntry(domain=DOMAIN, data=_entry_data(), version=1)
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Pin the jitter to the max so the scheduled import waits a full hour.
+    monkeypatch.setattr("custom_components.enchufado.randint", lambda a, b: b)
+
+    from custom_components.enchufado import coordinator
+
+    calls = []
+
+    async def counting_import(hass_, force=False):
+        calls.append(force)
+
+    monkeypatch.setattr(coordinator.EnchufadoCoordinator, "import_energy_data", counting_import)
+
+    import datetime as _dt
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    tomorrow = dt_util.utcnow() + _dt.timedelta(days=1)
+    async_fire_time_changed(hass, tomorrow.replace(hour=6, minute=30, second=0, microsecond=0))
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # The jitter would now have elapsed; a leaked task would import after unload.
+    async_fire_time_changed(hass, dt_util.utcnow() + _dt.timedelta(hours=2))
+    await hass.async_block_till_done()
+    assert calls == []  # the pending sleep was cancelled by the unload
