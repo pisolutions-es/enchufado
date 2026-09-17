@@ -22,6 +22,11 @@ class FakeResponse:
 
     async def json(self, content_type: Any = None) -> Any:
         if self._json is None:
+            if self._text:
+                # Real aiohttp with content_type=None attempts a decode and
+                # raises a JSON decode error on garbage bodies.
+                import json as _json
+                _json.loads(self._text)  # raises ValueError on non-JSON
             raise aiohttp.ContentTypeError(None, None)
         return self._json
 

@@ -6,7 +6,7 @@ import pytest
 from custom_components.enchufado import coordinator as coord_mod
 from custom_components.enchufado.coordinator import EnchufadoCoordinator as C
 from custom_components.enchufado.const import CURRENT_BILL_STATE
-from custom_components.enchufado.util import madrid_timestamp
+from custom_components.enchufado.util import madrid_timestamp, madrid_today
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -62,7 +62,7 @@ def _configure(tmp_path):
 async def test_import_skips_datadis_and_writes_when_up_to_date(tmp_path, monkeypatch):
     """A cycle over fully cached data must not hit Datadis nor rewrite files."""
     _configure(tmp_path)
-    end = datetime.date.today() - datetime.timedelta(days=2)
+    end = madrid_today() - datetime.timedelta(days=2)
     start = end - datetime.timedelta(days=40)
 
     lines = ["date,timestamp,consumption,price,reading_type"]
@@ -121,7 +121,7 @@ async def test_import_skips_datadis_and_writes_when_up_to_date(tmp_path, monkeyp
 
 async def test_calculate_bills_skips_state_write_when_unchanged(tmp_path, monkeypatch):
     _configure(tmp_path)
-    today = datetime.date.today()
+    today = madrid_today()
     period = {
         "start_date": today.replace(day=1) - datetime.timedelta(days=1),
         "end_date": today.replace(day=1) - datetime.timedelta(days=1),

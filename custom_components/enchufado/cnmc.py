@@ -132,26 +132,39 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
                 end_timestamp=madrid_timestamp(billing_period["end_date"]) * 1000,
             )
             async with session.get(url) as resp:
-                bill = await resp.json()
+                if resp.status != 200:
+                    _LOGGER.warning("CNMC: bill request failed with status %s for %s",
+                                    resp.status, billing_period["start_date"])
+                    return billing_period, csv_data
+                try:
+                    bill = await resp.json()
+                except ValueError:
+                    _LOGGER.warning("CNMC: bill response is not JSON for %s", billing_period["start_date"])
+                    return billing_period, csv_data
 
             _LOGGER.debug("CNMC full response keys: %s", list(bill.keys()) if isinstance(bill, dict) else type(bill))
-            _LOGGER.debug("CNMC full response: %s", str(bill)[:2000])
-            gasto = bill.get("graficoGastoTotalActual")
+            gasto = bill.get("graficoGastoTotalActual") if isinstance(bill, dict) else None
             if gasto:
-                consumo_diario = bill.get("graficaConsumoDiario", {}).get("consumosDiarios", [])
-                if consumo_diario:
-                    billing_period["start_date"] = datetime.datetime.strptime(
-                        consumo_diario[0]["fecha"], "%d/%m/%Y"
-                    ).date()
-                    billing_period["end_date"] = datetime.datetime.strptime(
-                        consumo_diario[-1]["fecha"], "%d/%m/%Y"
-                    ).date()
-                billing_period["total_cost"] = gasto["importeTotal"]
-                billing_period["power_cost"] = gasto["importePotencia"]
-                billing_period["energy_cost"] = gasto["importeEnergia"]
-                billing_period["rent_cost"] = gasto["importeAlquiler"]
-                billing_period["tax_cost"] = gasto["importeIVA"]
-                _LOGGER.info("CNMC: bill for %s → %.2f €", billing_period["start_date"], gasto["importeTotal"])
+                try:
+                    consumo_diario = bill.get("graficaConsumoDiario", {}).get("consumosDiarios", [])
+                    if consumo_diario:
+                        billing_period["start_date"] = datetime.datetime.strptime(
+                            consumo_diario[0]["fecha"], "%d/%m/%Y"
+                        ).date()
+                        billing_period["end_date"] = datetime.datetime.strptime(
+                            consumo_diario[-1]["fecha"], "%d/%m/%Y"
+                        ).date()
+                    total = float(gasto["importeTotal"])
+                    billing_period["total_cost"] = total
+                    billing_period["power_cost"] = float(gasto["importePotencia"])
+                    billing_period["energy_cost"] = float(gasto["importeEnergia"])
+                    billing_period["rent_cost"] = float(gasto["importeAlquiler"])
+                    billing_period["tax_cost"] = float(gasto["importeIVA"])
+                except (KeyError, TypeError, ValueError, IndexError) as err:
+                    _LOGGER.warning("CNMC: incomplete bill payload for %s: %s",
+                                    billing_period["start_date"], err)
+                    return billing_period, csv_data
+                _LOGGER.info("CNMC: bill for %s → %.2f €", billing_period["start_date"], total)
             else:
                 _LOGGER.warning("CNMC: unexpected bill response for %s: %s", billing_period["start_date"], str(bill)[:200])
     except Exception as err:

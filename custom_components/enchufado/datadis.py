@@ -6,6 +6,7 @@ https://datadis.es/private-api without external library dependencies.
 import asyncio
 import datetime
 import logging
+import math
 import random
 import time
 
@@ -42,6 +43,17 @@ DISTRIBUTOR_CODES = {
 async def _sleep(seconds: float) -> None:
     """Wait helper; tests patch this indirection instead of asyncio.sleep."""
     await asyncio.sleep(seconds)
+
+
+def _as_float(value) -> float | None:
+    """Parse a numeric API value, rejecting bools and non-finite (NaN/inf)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        out = float(value)
+    except ValueError:
+        return None
+    return out if math.isfinite(out) else None
 
 
 def _next_midnight() -> float:
@@ -104,7 +116,18 @@ async def _request(token: str, url: str, params: dict) -> tuple:
             session = await _get_session()
             async with session.get(url, params=params, headers=headers) as resp:
                 if resp.status == 200:
-                    return await resp.json(content_type=None), 200
+                    try:
+                        return await resp.json(content_type=None), 200
+                    except (aiohttp.ContentTypeError, ValueError):
+                        # A 200 with a non-JSON body (captive portal, WAF
+                        # HTML page) is deterministic — retrying just burns
+                        # quota. Fail fast.
+                        body = await resp.text()
+                        _LOGGER.warning(
+                            "Datadis %s returned non-JSON body (status 200): %s",
+                            url, body[:120],
+                        )
+                        return None, 200
                 if resp.status == 429 or resp.status >= 500:
                     delay = _retry_delay(attempt, resp.headers.get("Retry-After"))
                     if delay is None:
@@ -144,14 +167,26 @@ async def _request(token: str, url: str, params: dict) -> tuple:
 
 
 async def async_login(username: str, password: str) -> str | None:
-    """POST credentials to Datadis and return the Bearer token, or None on failure."""
+    """POST credentials to Datadis and return the Bearer token, or None on failure.
+
+    The endpoint is expected to return the raw token as text. A 200 whose body
+    looks like an HTML page (WAF/redirect interstitial) or is empty is treated
+    as a failure instead of storing garbage as the token.
+    """
     attempt = 0
     while True:
         try:
             session = await _get_session()
             async with session.post(_URL_TOKEN, data={"username": username, "password": password}) as resp:
                 if resp.status == 200:
-                    return await resp.text()
+                    body = (await resp.text()).strip()
+                    if not body or body[:1] in "<{" or "DOCTYPE" in body[:200]:
+                        _LOGGER.error(
+                            "Datadis login returned an unexpected %d-byte body (looks like HTML, not a token)",
+                            len(body),
+                        )
+                        return None
+                    return body
                 text = await resp.text()
                 if resp.status >= 500 or resp.status == 429:
                     delay = _retry_delay(attempt, resp.headers.get("Retry-After"))
@@ -184,13 +219,22 @@ async def async_get_supplies(token: str, authorized_nif: str | None = None) -> l
 
     # API may return {"supplies": [...]} or a plain list
     items = data.get("supplies", data) if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        _LOGGER.warning("Datadis supplies: unexpected payload type %s", type(items).__name__)
+        return []
     supplies = []
     for item in items:
-        if not all(k in item for k in ("cups", "pointType", "distributorCode")):
+        if not isinstance(item, dict) or not all(k in item for k in ("cups", "pointType", "distributorCode")):
+            continue
+        point_type = _as_float(item["pointType"])
+        if point_type is None:
+            continue
+        cups = item["cups"]
+        if not isinstance(cups, str) or not cups:
             continue
         supplies.append({
-            "cups": item["cups"],
-            "point_type": int(item["pointType"]),
+            "cups": cups,
+            "point_type": int(point_type),
             "distributor_code": str(item["distributorCode"]),
             "distributor_name": DISTRIBUTOR_CODES.get(str(item["distributorCode"]), str(item["distributorCode"])),
             "address": item.get("address"),
@@ -217,13 +261,15 @@ async def async_get_contract_detail(
         return None
 
     items = data.get("contract", data) if isinstance(data, dict) else data
-    if not items:
+    if not isinstance(items, list) or not items:
+        if not isinstance(items, list):
+            _LOGGER.warning("Datadis contract detail: unexpected payload type %s", type(items).__name__)
         return None
 
     # Pick the most recently started contract
     contracts = sorted(
-        items,
-        key=lambda c: c.get("startDate", ""),
+        (c for c in items if isinstance(c, dict)),
+        key=lambda c: str(c.get("startDate", "")),
         reverse=True,
     )
     return contracts[0] if contracts else None
@@ -298,7 +344,10 @@ class Datadis:
         if not data:
             return {}
 
-        records = data if isinstance(data, list) else data.get("timeCurve", [])
+        records = data if isinstance(data, list) else data.get("timeCurve", []) if isinstance(data, dict) else []
+        if not isinstance(records, list):
+            _LOGGER.warning("Datadis consumptions: unexpected payload type %s", type(records).__name__)
+            return {}
         result = {}
         for item in records:
             try:
@@ -308,12 +357,16 @@ class Datadis:
                 )
                 if not (start_date <= dt.date() <= end_date):
                     continue
+                value = _as_float(item["consumptionKWh"])
+                if value is None or value < 0:  # kWh can never be negative
+                    _LOGGER.debug("Skipping invalid consumption value: %r", item.get("consumptionKWh"))
+                    continue
                 ts = madrid_timestamp(dt)
                 result[ts] = {
-                    "value": float(item["consumptionKWh"]),
+                    "value": value,
                     "reading_type": "R" if item.get("obtainMethod") == "Real" else "E",
                 }
-            except (KeyError, ValueError, TypeError) as err:
+            except (KeyError, ValueError, TypeError, AttributeError) as err:
                 _LOGGER.debug("Skipping consumption record %s: %s", item, err)
 
         _LOGGER.info(
