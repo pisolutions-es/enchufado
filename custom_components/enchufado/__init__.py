@@ -11,6 +11,7 @@ from homeassistant.helpers.event import async_track_time_change
 from .const import DOMAIN
 from .coordinator import EnchufadoCoordinator
 from .datadis import close_session as close_datadis_session
+from .repairs import async_clear_repairs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ async def async_unload_entry(hass, entry) -> bool:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
         entry_data["unsub_options_update_listener"]()
         await close_datadis_session()
+        await async_clear_repairs(hass)
         hass.services.async_remove(DOMAIN, "import_energy_data")
         hass.services.async_remove(DOMAIN, "force_import_energy_data")
         hass.services.async_remove(DOMAIN, "reprocess_energy_data")

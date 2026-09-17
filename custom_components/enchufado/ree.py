@@ -14,6 +14,9 @@ _TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15)
 
 class REE:
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
+    # Health signal for the repair flows: None healthy, "auth" token rejected,
+    # "network" unreachable/malformed. Reset by the coordinator before each fetch cycle.
+    last_error: str | None = None
 
     @staticmethod
     def _headers(token):
@@ -49,16 +52,21 @@ class REE:
                             return None
                     else:
                         _LOGGER.warning("REE.pvpc: unexpected status %s", resp.status)
+                        REE.last_error = "auth" if resp.status in (401, 403) else "network"
                         return None
         except (aiohttp.ClientError, TimeoutError) as err:
             _LOGGER.warning("REE.pvpc request failed: %s", err)
+            REE.last_error = "network"
             return None
 
         values = response.get("indicator", {}).get("values") if isinstance(response, dict) else None
         if values is None:
             _LOGGER.warning("REE.pvpc: malformed payload (keys: %s)",
                             list(response) if isinstance(response, dict) else type(response).__name__)
+            REE.last_error = "network"
             return None
+
+        REE.last_error = None
 
         result = {}
         for value in values:

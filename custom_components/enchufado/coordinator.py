@@ -47,6 +47,7 @@ from .const import (
 )
 from .datadis import Datadis
 from .ree import REE
+from .repairs import async_manage_repairs
 from .util import MADRID_TZ, madrid_timestamp, madrid_today
 
 _LOGGER = logging.getLogger(__name__)
@@ -262,6 +263,9 @@ class EnchufadoCoordinator:
         # --- Billing simulation via CNMC ---
         billing_periods = await EnchufadoCoordinator.get_billing_periods(hass, consumptions)
         await EnchufadoCoordinator.calculate_bills(hass, billing_periods, consumptions, force_update)
+
+        # --- Repairs UI reflects the upstream health after this cycle ---
+        await async_manage_repairs(hass)
 
         _LOGGER.debug("import_energy_data() done")
 

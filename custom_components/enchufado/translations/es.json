@@ -29,5 +29,31 @@
     "abort": {
       "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
     }
+  },
+  "issues": {
+    "datadis_auth_failed": {
+      "title": "Datadis rechazó las credenciales",
+      "description": "Datadis no acepta el usuario o la contraseña guardados (o el NIF autorizado). El consumo horario no se actualizará.\n\nVe a Ajustes → Dispositivos y servicios → Enchufado → Configura y vuelve a introducir tus credenciales de datadis.es."
+    },
+    "datadis_quota_exhausted": {
+      "title": "Cuota diaria de Datadis agotada",
+      "description": "La API de Datadis está devolviendo el límite diario de peticiones. Enchufado no hará más peticiones hasta la medianoche (peninsular) para no agravar la cuota."
+    },
+    "datadis_unreachable": {
+      "title": "Datadis no responde",
+      "description": "Las peticiones a la API de Datadis están fallando (error de red o del servidor). Enchufado reintentará en el próximo ciclo de importación; no hace falta hacer nada."
+    },
+    "esios_token_rejected": {
+      "title": "ESIOS-REE rechazó el token",
+      "description": "La API de ESIOS-REE está devolviendo un error de autenticidad para el token configurado. Los precios PVPC no se actualizarán.\n\nSolicita un token nuevo por email a ESIOS y actualízalo eliminando y volviendo a añadir la integración."
+    },
+    "esios_token_missing": {
+      "title": "Falta el token de ESIOS-REE",
+      "description": "La integración no tiene token de la API ESIOS-REE, así que los precios PVPC no se descargan ni se calculan los costes.\n\nSolicita un token personal gratuito por email a ESIOS y configura la integración de nuevo."
+    },
+    "esios_unreachable": {
+      "title": "ESIOS-REE no responde",
+      "description": "Las peticiones de precios PVPC a la API de ESIOS-REE están fallando. Enchufado reintentará en el próximo ciclo; el consumo se sigue importando."
+    }
   }
 }

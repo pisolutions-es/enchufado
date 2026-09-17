@@ -29,5 +29,31 @@
     "abort": {
       "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
     }
+  },
+  "issues": {
+    "datadis_auth_failed": {
+      "title": "Datadis rejected the stored credentials",
+      "description": "Datadis does not accept the saved username/password (or authorized NIF). Hourly consumption will not update.\n\nGo to Settings → Devices & Services → Enchufado → Configure and re-enter your datadis.es credentials."
+    },
+    "datadis_quota_exhausted": {
+      "title": "Datadis daily quota exhausted",
+      "description": "The Datadis API is returning its daily request limit. Enchufado will not make further requests until next midnight (peninsular Spain) to avoid aggravating the quota."
+    },
+    "datadis_unreachable": {
+      "title": "Datadis is unreachable",
+      "description": "Requests to the Datadis API are failing (network or server error). Enchufado will retry on the next import cycle; no action needed."
+    },
+    "esios_token_rejected": {
+      "title": "ESIOS-REE rejected the API token",
+      "description": "The ESIOS-REE API returns an authentication error for the configured token. PVPC prices will not update.\n\nRequest a new token from ESIOS by email and re-add the integration to store it."
+    },
+    "esios_token_missing": {
+      "title": "ESIOS-REE API token missing",
+      "description": "The integration has no ESIOS-REE API token, so PVPC prices and cost statistics are not generated.\n\nRequest a free personal token from ESIOS by email and configure the integration again."
+    },
+    "esios_unreachable": {
+      "title": "ESIOS-REE is unreachable",
+      "description": "PVPC price requests to the ESIOS-REE API are failing. Enchufado will retry on the next cycle; consumption import continues normally."
+    }
   }
 }

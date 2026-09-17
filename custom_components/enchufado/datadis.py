@@ -285,6 +285,10 @@ class Datadis:
     point_type: int = None
     authorized_nif: str = None
     _token: str = None
+    # Last fetch health signal for the repair flows: None (healthy),
+    # "auth" (login/token rejected), "quota" (daily quota exhausted),
+    # "network" (endpoint unreachable / repeated server errors).
+    last_error: str | None = None
 
     @staticmethod
     def setup(username, password, cups, distributor_code, point_type, authorized_nif=None):
@@ -295,6 +299,7 @@ class Datadis:
         Datadis.point_type = int(point_type)
         Datadis.authorized_nif = authorized_nif
         Datadis._token = None
+        Datadis.last_error = None
 
     @staticmethod
     async def _ensure_token() -> bool:
@@ -313,12 +318,14 @@ class Datadis:
         Returns {unix_timestamp: {'value': kwh, 'reading_type': 'R'|'E'}}
         Compatible with pvpc_energy coordinator interface.
         Timestamps are local (Madrid) Unix epoch.
+        Sets Datadis.last_error for the integration's repair issues.
         """
         if not all([Datadis.cups, Datadis.distributor_code, Datadis.point_type]):
             _LOGGER.error("Datadis not configured — call Datadis.setup() first")
             return {}
 
         if not await Datadis._ensure_token():
+            Datadis.last_error = "auth"
             return {}
 
         params = {
@@ -338,12 +345,23 @@ class Datadis:
         if data is None and status == 401:
             Datadis._token = None
             if not await Datadis._ensure_token():
+                Datadis.last_error = "auth"
                 return {}
-            data, _ = await _request(Datadis._token, _URL_CONSUMPTION, params)
+            data, status = await _request(Datadis._token, _URL_CONSUMPTION, params)
 
         if not data:
+            if data is None:
+                # empty-but-successful payloads parse to {} (legitimately empty
+                # range); only a failed request is an error signal
+                if status == 429:
+                    Datadis.last_error = "quota"
+                elif status is None or (status and status >= 500):
+                    Datadis.last_error = "network"
+                else:
+                    Datadis.last_error = None
             return {}
 
+        Datadis.last_error = None
         records = data if isinstance(data, list) else data.get("timeCurve", []) if isinstance(data, dict) else []
         if not isinstance(records, list):
             _LOGGER.warning("Datadis consumptions: unexpected payload type %s", type(records).__name__)
