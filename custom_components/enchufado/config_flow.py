@@ -40,9 +40,13 @@ _AUTH_SCHEMA = vol.Schema(
 
 
 class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    _supplies: list = []
-    _token: str = None
-    data: Dict[str, Any] = {}
+    VERSION = 1  # config entry data schema; bump together with async_migrate_entry
+
+    def __init__(self) -> None:
+        # Instance state: class attributes would leak between concurrent flows.
+        self._supplies: list[dict] = []
+        self._token: str | None = None
+        self.data: dict[str, Any] = {}
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None):
         errors = {}
@@ -94,7 +98,7 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             power_low = 4.6
             try:
                 contract = await async_get_contract_detail(
-                    self._token,
+                    self._token or "",
                     cups_value,
                     supply["distributor_code"],
                     self.data.get(CONF_AUTHORIZED_NIF),

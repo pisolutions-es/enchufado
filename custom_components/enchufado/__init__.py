@@ -65,6 +65,24 @@ async def options_update_listener(hass, config_entry):
     await hass.config_entries.async_reload(config_entry.entry_id)
 
 
+async def async_migrate_entry(hass, config_entry) -> bool:
+    """Migrate a config entry to the current schema version.
+
+    The data schema has been stable since the first release (version 1), so
+    there is nothing to rewrite; entries from older fork builds load as-is.
+    Entries from a NEWER version (downgrade) are refused rather than loaded
+    half-migrated.
+    """
+    if config_entry.version > 1:
+        _LOGGER.error(
+            "Enchufado config entry version %s is newer than this integration "
+            "supports — update the Enchufado integration",
+            config_entry.version,
+        )
+        return False
+    return True
+
+
 async def async_unload_entry(hass, entry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
