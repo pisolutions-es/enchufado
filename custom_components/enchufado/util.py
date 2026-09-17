@@ -5,6 +5,16 @@ from zoneinfo import ZoneInfo
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 
+def madrid_today() -> datetime.date:
+    """Today's calendar date in peninsular Spain.
+
+    `datetime.date.today()` uses the host timezone, which on UTC-configured
+    hosts disagrees with Madrid for the last/first hours of the day and can
+    shift import windows and billing-period boundaries by a day.
+    """
+    return datetime.datetime.now(MADRID_TZ).date()
+
+
 def madrid_timestamp(value: datetime.date) -> int:
     """Convert a naive date/datetime representing Europe/Madrid local time to a Unix timestamp.
 

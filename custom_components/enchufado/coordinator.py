@@ -47,7 +47,7 @@ from .const import (
 )
 from .datadis import Datadis
 from .ree import REE
-from .util import MADRID_TZ, madrid_timestamp
+from .util import MADRID_TZ, madrid_timestamp, madrid_today
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,12 +156,12 @@ class EnchufadoCoordinator:
 
         # Datadis rejects months whose 1st day exceeds the 2-year window.
         # Advancing by 1 month keeps us safely within the limit.
-        _today = datetime.date.today()
+        _today = madrid_today()
         if _today.month == 12:
             start_date = datetime.date(_today.year - 1, 1, 1)
         else:
             start_date = datetime.date(_today.year - 2, _today.month + 1, 1)
-        end_date = datetime.date.today() - datetime.timedelta(days=2)
+        end_date = madrid_today() - datetime.timedelta(days=2)
 
         consumptions, prices = await EnchufadoCoordinator.load_energy_data(
             hass, EnchufadoCoordinator.energy_file, start_date
@@ -522,7 +522,7 @@ class EnchufadoCoordinator:
         existing_by_start = {p["start_date"]: p for p in existing}
         start_date = datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
         end_date = datetime.datetime.fromtimestamp(max(consumptions.keys()), MADRID_TZ).date()
-        today = datetime.date.today()
+        today = madrid_today()
 
         for p in EnchufadoCoordinator.generate_monthly_periods(
             start_date,
