@@ -6,8 +6,8 @@ Statistics handling and data persistence derived from pvpc_energy by yinyang17
 import datetime
 import logging
 from functools import partial
-from os import makedirs
 from os.path import exists
+from typing import Any, Awaitable, Callable
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMeanType, StatisticMetaData
@@ -17,6 +17,7 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.const import CURRENCY_EURO, UnitOfEnergy
+from homeassistant.core import HomeAssistant
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from homeassistant.helpers import entity_registry as er
@@ -52,17 +53,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class EnchufadoCoordinator:
-    datadis_user = None
-    datadis_password = None
-    cups = None
-    authorized_nif = None
-    power_high = None
-    power_low = None
-    zip_code = None
-    esios_token = None
-    user_files_path = None
-    energy_file = None
-    billing_periods_file = None
+    datadis_user: str | None = None
+    datadis_password: str | None = None
+    cups: str | None = None
+    authorized_nif: str | None = None
+    power_high: float = 4.6
+    power_low: float = 4.6
+    zip_code: str = ""
+    esios_token: str | None = None
+    user_files_path: str = ""
+    energy_file: str = ""
+    billing_periods_file: str = ""
 
     consumption_metadata = StatisticMetaData(
         name=CONSUMPTION_STATISTIC_NAME,
@@ -95,7 +96,8 @@ class EnchufadoCoordinator:
     _SENSITIVE_CONFIG_KEYS = {CONF_DATADIS_USER, CONF_DATADIS_PASSWORD, CONF_AUTHORIZED_NIF, CONF_ESIOS_TOKEN}
 
     @staticmethod
-    def set_config(config, hass):
+    def set_config(config: dict[str, Any], hass: HomeAssistant) -> None:
+        """Apply config-entry data and (re)initialize the Datadis client."""
         _LOGGER.debug(
             "set_config: %s",
             {k: v for k, v in config.items() if k not in EnchufadoCoordinator._SENSITIVE_CONFIG_KEYS},
@@ -130,7 +132,8 @@ class EnchufadoCoordinator:
         )
 
     @staticmethod
-    async def reprocess_energy_data(hass):
+    async def reprocess_energy_data(hass: HomeAssistant) -> None:
+        """Rebuild consumption/cost statistics from the locally stored data."""
         _LOGGER.debug("reprocess_energy_data()")
         consumptions, prices = await EnchufadoCoordinator.load_energy_data(
             hass, EnchufadoCoordinator.energy_file
@@ -141,7 +144,12 @@ class EnchufadoCoordinator:
             async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
     @staticmethod
-    async def import_energy_data(hass, force_update=False):
+    async def import_energy_data(hass: HomeAssistant, force_update: bool = False) -> None:
+        """Pull missing consumption (Datadis) and prices (REE), refresh stats and bills.
+
+        With force_update=True the full ~2-year window is refetched and
+        statistics are rebuilt from scratch.
+        """
         _LOGGER.debug("import_energy_data(force_update=%s)", force_update)
         energy_file_exists = await hass.async_add_executor_job(exists, EnchufadoCoordinator.energy_file)
         _LOGGER.debug("energy_data path: %s (exists=%s)", EnchufadoCoordinator.energy_file, energy_file_exists)
@@ -258,8 +266,19 @@ class EnchufadoCoordinator:
         _LOGGER.debug("import_energy_data() done")
 
     @staticmethod
-    async def get_data(getter, start_date, end_date, data, days, force_update=False):
-        """Fetch data in chunks, skipping already-cached date ranges."""
+    async def get_data(
+        getter: Callable[..., Awaitable[dict[int, float] | None]],
+        start_date: datetime.date,
+        end_date: datetime.date,
+        data: dict[int, float],
+        days: int,
+        force_update: bool = False,
+    ) -> None:
+        """Fetch data in chunks, skipping already-cached date ranges.
+
+        getter(start, end) returns {timestamp: value}, None on hard failure
+        (stop), or {} for a legitimately empty range (continue).
+        """
         data_len = len(data)
         request_start_date = end_date + datetime.timedelta(days=1)
         while request_start_date > start_date:
@@ -288,7 +307,9 @@ class EnchufadoCoordinator:
         _LOGGER.debug("get_data: +%d new records", len(data) - data_len)
 
     @staticmethod
-    def _read_energy_file(file_path, start_date=None):
+    def _read_energy_file(
+        file_path: str, start_date: datetime.date | None = None
+    ) -> tuple[dict[int, dict[str, Any]], dict[int, float]]:
         """Blocking: read + parse the energy CSV file. Call via executor."""
         consumptions = {}
         prices = {}
@@ -332,13 +353,20 @@ class EnchufadoCoordinator:
         return consumptions, prices
 
     @staticmethod
-    async def load_energy_data(hass, file_path, start_date=None):
+    async def load_energy_data(
+        hass: HomeAssistant, file_path: str, start_date: datetime.date | None = None
+    ) -> tuple[dict[int, dict[str, Any]], dict[int, float]]:
+        """Load cached consumption/prices from disk off the event loop."""
         return await hass.async_add_executor_job(
             EnchufadoCoordinator._read_energy_file, file_path, start_date
         )
 
     @staticmethod
-    def _write_energy_file(file_path, consumptions, prices):
+    def _write_energy_file(
+        file_path: str,
+        consumptions: dict[int, dict[str, Any]],
+        prices: dict[int, float],
+    ) -> None:
         """Blocking: write the energy CSV file. Call via executor."""
         timestamps = sorted(set(list(consumptions.keys()) + list(prices.keys())))
         with open(file_path, "w") as f:
@@ -352,13 +380,29 @@ class EnchufadoCoordinator:
                 f.write(f"{date},{ts},{consumption},{price},{reading_type}\n")
 
     @staticmethod
-    async def save_energy_data(hass, file_path, consumptions, prices):
+    async def save_energy_data(
+        hass: HomeAssistant,
+        file_path: str,
+        consumptions: dict[int, dict[str, Any]],
+        prices: dict[int, float],
+    ) -> None:
+        """Persist consumption/prices to disk off the event loop."""
         await hass.async_add_executor_job(
             EnchufadoCoordinator._write_energy_file, file_path, consumptions, prices
         )
 
     @staticmethod
-    def create_statistics(last_statistic_timestamp, consumptions, prices, total_energy_consumption, total_energy_cost):
+    def create_statistics(
+        last_statistic_timestamp: int,
+        consumptions: dict[int, dict[str, Any]],
+        prices: dict[int, float],
+        total_energy_consumption: float,
+        total_energy_cost: float,
+    ) -> tuple[list[StatisticData], list[StatisticData]]:
+        """Hourly consumption/cost statistic rows resuming from last_statistic_timestamp.
+
+        Missing consumption hours count as 0 kWh; missing prices as 0 €/kWh.
+        """
         _LOGGER.debug(
             "create_statistics: last_ts=%s, consumptions=%d, prices=%d",
             last_statistic_timestamp, len(consumptions), len(prices),
@@ -528,7 +572,7 @@ class EnchufadoCoordinator:
         )
         updated, _ = await calculate_bill(
             billing_period,
-            EnchufadoCoordinator.cups,
+            EnchufadoCoordinator.cups or "",
             period_consumptions,
             EnchufadoCoordinator.zip_code or "",
         )
