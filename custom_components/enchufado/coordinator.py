@@ -587,26 +587,30 @@ class EnchufadoCoordinator:
         total_cost = latest.get("total_cost", "-")
         state_value = f"{total_cost:.2f} €" if isinstance(total_cost, (int, float)) else str(total_cost)
 
-        hass.states.async_set(
-            CURRENT_BILL_STATE,
-            state_value,
-            {
-                "friendly_name": "Factura actual",
-                "bills": [
-                    {
-                        "start": p["start_date"].isoformat(),
-                        "end": p["end_date"].isoformat(),
-                        "total_cost": p.get("total_cost"),
-                        "total_consumption": p.get("total_consumption"),
-                        "power_cost": p.get("power_cost"),
-                        "energy_cost": p.get("energy_cost"),
-                        "rent_cost": p.get("rent_cost"),
-                        "tax_cost": p.get("tax_cost"),
-                    }
-                    for p in calculated
-                ],
-            },
-        )
+        attributes = {
+            "friendly_name": "Factura actual",
+            "bills": [
+                {
+                    "start": p["start_date"].isoformat(),
+                    "end": p["end_date"].isoformat(),
+                    "total_cost": p.get("total_cost"),
+                    "total_consumption": p.get("total_consumption"),
+                    "power_cost": p.get("power_cost"),
+                    "energy_cost": p.get("energy_cost"),
+                    "rent_cost": p.get("rent_cost"),
+                    "tax_cost": p.get("tax_cost"),
+                }
+                for p in calculated
+            ],
+        }
+
+        # Skip the state write when nothing changed: identical state+attributes
+        # would still fire a state-machine event and a recorder event row.
+        current = hass.states.get(CURRENT_BILL_STATE)
+        if current is not None and current.state == state_value and current.attributes == attributes:
+            _LOGGER.debug("calculate_bills: current_bill unchanged, skipping state write")
+        else:
+            hass.states.async_set(CURRENT_BILL_STATE, state_value, attributes)
         _LOGGER.info("calculate_bills: published %d bills, latest=%.2f €", len(calculated), total_cost if isinstance(total_cost, (int, float)) else 0)
 
         # Insert enchufado:bill as an external statistic (one point per period)
