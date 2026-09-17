@@ -37,6 +37,7 @@ _MSG_NO_DATA = "Aviso: No hay datos para el período de facturación"
 _MSG_BAD_FILE = "Aviso: El formato del fichero de consumo no es el correcto"
 
 _HEADERS = {"Content-Type": "application/json"}
+_TIMEOUT = aiohttp.ClientTimeout(total=120, connect=15)
 
 
 async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zip_code: str):
@@ -90,7 +91,7 @@ async def calculate_bill(billing_period: dict, cups: str, consumptions: dict, zi
     encoded = base64.b64encode(csv_data.encode("utf-8")).decode("utf-8")
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             # Step 1: upload consumption curve
             energy_file = None
             async with session.post(

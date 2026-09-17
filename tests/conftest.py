@@ -20,6 +20,18 @@ if _REPO_CC not in list(custom_components.__path__):
 
 
 @pytest.fixture(autouse=True)
+def reset_datadis_module_state():
+    """Module-level session/quota must not leak between tests."""
+    from custom_components.enchufado import datadis
+
+    datadis._session = None
+    datadis._quota_blocked_until = 0.0
+    yield
+    datadis._session = None
+    datadis._quota_blocked_until = 0.0
+
+
+@pytest.fixture(autouse=True)
 def auto_custom_integration_setup(request):
     """Wire custom integrations, respecting the plugin's recorder bootstrap order.
 

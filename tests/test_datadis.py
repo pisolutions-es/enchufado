@@ -11,9 +11,18 @@ from fakes import FakeResponse, install_fake_session, route
 
 
 @pytest.fixture(autouse=True)
-def reset_datadis_state():
+def reset_datadis_state(monkeypatch):
     Datadis.setup("u", "p", "cups", "2", 1)
+    datadis._session = None
+    datadis._quota_blocked_until = 0.0
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(datadis, "_sleep", no_sleep)
     yield
+    datadis._session = None
+    datadis._quota_blocked_until = 0.0
 
 
 def _setup_datadis():
@@ -137,3 +146,93 @@ async def test_get_contract_detail_picks_latest(monkeypatch):
     ])
     contract = await datadis.async_get_contract_detail("tok", "CUPS", "2")
     assert contract["startDate"] == "2024-06-01"
+
+
+# ------------------------------------------------------------- resilience
+
+async def test_transient_error_is_retried(monkeypatch):
+    _setup_datadis()
+    state = {"attempts": 0}
+
+    def flaky(**_):
+        state["attempts"] += 1
+        if state["attempts"] < 3:
+            raise OSError("connection reset")
+        return FakeResponse(200, json_data=[])
+
+    install_fake_session(monkeypatch, [route("GET", r"get-consumption-data", flaky)])
+    d = datetime.date(2026, 3, 1)
+    assert await Datadis.consumptions(d, d) == {}
+    assert state["attempts"] == 3  # recovered on the third attempt
+
+
+async def test_5xx_retried_then_gives_up(monkeypatch):
+    _setup_datadis()
+    fake = install_fake_session(monkeypatch, [
+        route("GET", r"get-consumption-data", FakeResponse(503, text="unavailable")),
+    ])
+    d = datetime.date(2026, 3, 1)
+    assert await Datadis.consumptions(d, d) == {}
+    gets = [c for c in fake["calls"] if c["method"] == "GET"]
+    assert len(gets) == datadis._MAX_RETRIES + 1  # bounded retries
+
+
+async def test_retry_after_header_respected(monkeypatch):
+    _setup_datadis()
+    delays: list[float] = []
+
+    async def capture_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr(datadis, "_sleep", capture_sleep)
+    state = {"gets": 0}
+
+    def handler(**_):
+        state["gets"] += 1
+        if state["gets"] == 1:
+            return FakeResponse(429, text="slow down", headers={"Retry-After": "7"})
+        return FakeResponse(200, json_data=[])
+
+    install_fake_session(monkeypatch, [route("GET", r"get-consumption-data", handler)])
+    d = datetime.date(2026, 3, 1)
+    await Datadis.consumptions(d, d)
+    assert delays == [7.0]  # waited exactly the advertised seconds
+
+
+async def test_429_without_retry_after_sets_daily_quota(monkeypatch):
+    _setup_datadis()
+    fake = install_fake_session(monkeypatch, [
+        route("GET", r"get-consumption-data", FakeResponse(429, text="quota")),
+    ])
+    d = datetime.date(2026, 3, 1)
+    await Datadis.consumptions(d, d)
+    gets_round1 = len([c for c in fake["calls"] if c["method"] == "GET"])
+    assert datadis._quota_blocked_until > __import__("time").time()
+    # next cycle: short-circuited, no HTTP at all
+    await Datadis.consumptions(d, d)
+    assert len([c for c in fake["calls"] if c["method"] == "GET"]) == gets_round1
+
+
+async def test_shared_session_with_timeout(monkeypatch):
+    _setup_datadis()
+    fake = install_fake_session(monkeypatch, [
+        route("GET", r"get-consumption-data", FakeResponse(200, json_data=[])),
+    ])
+    d = datetime.date(2026, 3, 1)
+    await Datadis.consumptions(d, d)
+    await Datadis.consumptions(d + datetime.timedelta(days=1), d + datetime.timedelta(days=1))
+    assert fake["manager"].created == 1  # one session for both requests
+    assert fake["manager"].timeouts[0].total == datadis._TIMEOUT.total
+
+
+async def test_close_session_recreates_next_time(monkeypatch):
+    _setup_datadis()
+    fake = install_fake_session(monkeypatch, [
+        route("GET", r"get-consumption-data", FakeResponse(200, json_data=[])),
+    ])
+    d = datetime.date(2026, 3, 1)
+    await Datadis.consumptions(d, d)
+    await datadis.close_session()
+    assert fake["closed"]  # underlying session was closed
+    await Datadis.consumptions(d, d)
+    assert fake["manager"].created == 2  # fresh session after close

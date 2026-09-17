@@ -8,6 +8,8 @@ import logging
 
 _LOGGER = logging.getLogger(__name__)
 
+_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15)
+
 
 class REE:
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
@@ -29,10 +31,16 @@ class REE:
             end_date=end_date.strftime("%Y-%m-%dT23%%3A00%%3A00"),
         )
         response = None
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=REE._headers(token)) as resp:
-                if resp.status == 200:
-                    response = await resp.json()
+        try:
+            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+                async with session.get(url, headers=REE._headers(token)) as resp:
+                    if resp.status == 200:
+                        response = await resp.json()
+                    else:
+                        _LOGGER.warning("REE.pvpc: unexpected status %s", resp.status)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.warning("REE.pvpc request failed: %s", err)
+            return None
 
         if response is None:
             return None

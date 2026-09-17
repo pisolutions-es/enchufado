@@ -89,8 +89,10 @@ class FakeSessionManager:
     def __init__(self, session: FakeSession):
         self._session = session
         self.timeouts: list = []
+        self.created = 0
 
     def __call__(self, *args, **kwargs):
+        self.created += 1
         if "timeout" in kwargs:
             self.timeouts.append(kwargs["timeout"])
         return self._session
