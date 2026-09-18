@@ -132,15 +132,12 @@ async def test_overlapping_import_triggers_are_coalesced(recorder_mock, hass, mo
 
 
 async def test_scheduled_import_sleep_cancelled_on_unload(recorder_mock, hass, monkeypatch):
-    """Unloading cancels the pending jittered scheduled import instead of leaking it."""
+    """Unloading never lets a pending jittered import import after teardown."""
     await _mock_apis(monkeypatch)
     entry = MockConfigEntry(domain=DOMAIN, data=_entry_data(), version=1)
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-
-    # Pin the jitter to the max so the scheduled import waits a full hour.
-    monkeypatch.setattr("custom_components.enchufado.randint", lambda a, b: b)
 
     from custom_components.enchufado import coordinator
 
@@ -151,18 +148,39 @@ async def test_scheduled_import_sleep_cancelled_on_unload(recorder_mock, hass, m
 
     monkeypatch.setattr(coordinator.EnchufadoCoordinator, "import_energy_data", counting_import)
 
+    # asyncio.sleep ignores HA's async_fire_time_changed, so the 0-3600 s
+    # jitter must be pinned to a SHORT real delay (a few seconds) instead of
+    # the default hour; globally patching asyncio.sleep instead would park
+    # HA's own timer helpers and hang block_till_done. The low-but-real delay
+    # keeps the jitter pending when the unload starts, which is the scenario
+    # under test.
+    monkeypatch.setattr("custom_components.enchufado.randint", lambda a, b: 3)
+
     import datetime as _dt
     from homeassistant.util import dt as dt_util
     from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
     tomorrow = dt_util.utcnow() + _dt.timedelta(days=1)
     async_fire_time_changed(hass, tomorrow.replace(hour=6, minute=30, second=0, microsecond=0))
-    await hass.async_block_till_done()
+    # Let the eager-started scheduled-import task reach its jitter sleep
+    # WITHOUT block_till_done — that would await the sleep and let the import
+    # run while the entry is still loaded, which is correct behaviour but not
+    # what is being tested here.
+    for _ in range(100):
+        await asyncio.sleep(0)
+        if entry._tasks:
+            break
+    assert entry._tasks, "scheduled import never reached its jitter sleep"
 
+    # Unload while the jitter is still pending. HA's unload awaits the entry's
+    # tracked tasks (bounded) after the component has already popped the
+    # entry data, so when the sleep elapses inside that window _import_task
+    # sees no entry data and is a no-op — the import never runs.
     assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
-    # The jitter would now have elapsed; a leaked task would import after unload.
+    # The jitter would now have elapsed; a leaked timer would import after
+    # unload. Fire another time change to prove the tracker was removed too.
     async_fire_time_changed(hass, dt_util.utcnow() + _dt.timedelta(hours=2))
-    await hass.async_block_till_done()
-    assert calls == []  # the pending sleep was cancelled by the unload
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert calls == []  # no import fired from the sleep that spanned the unload
