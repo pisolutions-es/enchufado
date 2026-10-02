@@ -217,24 +217,24 @@ class EnchufadoCoordinator:
                 last_stat = await get_instance(hass).async_add_executor_job(
                     get_last_statistics, hass, 1, CONSUMPTION_STATISTIC_ID, True, set()
                 )
+                # get_last_statistics returns {} (or omits the id) when the
+                # recorder has never seen these statistics; treat it as "no
+                # resume point" instead of KeyErroring below.
+                last_rows = (last_stat or {}).get(CONSUMPTION_STATISTIC_ID)
                 if (
                     force_update
-                    or not last_stat
+                    or not last_rows
                     or first_consumption_date is None
                     or first_consumption_date
                     != datetime.datetime.fromtimestamp(min(consumptions.keys()), MADRID_TZ).date()
                     or last_consumption_date
-                    != datetime.datetime.fromtimestamp(
-                        last_stat[CONSUMPTION_STATISTIC_ID][0]["start"], datetime.UTC
-                    ).date()
+                    != datetime.datetime.fromtimestamp(last_rows[0]["start"], datetime.UTC).date()
                 ):
                     c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
                         0, consumptions, prices, 0, 0
                     )
                 else:
-                    start = datetime.datetime.fromtimestamp(
-                        last_stat[CONSUMPTION_STATISTIC_ID][0]["start"], datetime.UTC
-                    )
+                    start = datetime.datetime.fromtimestamp(last_rows[0]["start"], datetime.UTC)
                     stats = await get_instance(hass).async_add_executor_job(
                         statistics_during_period,
                         hass,
@@ -245,12 +245,26 @@ class EnchufadoCoordinator:
                         None,
                         {"sum"},
                     )
-                    total_consumption = stats[CONSUMPTION_STATISTIC_ID][0]["sum"]
-                    total_cost = stats[COST_STATISTIC_ID][0]["sum"]
-                    last_ts = stats[COST_STATISTIC_ID][0]["start"]
-                    c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
-                        last_ts, consumptions, prices, total_consumption, total_cost
-                    )
+                    cost_rows = stats.get(COST_STATISTIC_ID) or []
+                    consumption_rows = stats.get(CONSUMPTION_STATISTIC_ID) or []
+                    if not cost_rows or not consumption_rows:
+                        # The CSV survived but the recorder statistics were
+                        # wiped (DB migration, purge, new install): resume is
+                        # impossible, rebuild the whole history.
+                        _LOGGER.warning(
+                            "Recorder returned no statistics for %s — rebuilding the full history",
+                            COST_STATISTIC_ID,
+                        )
+                        c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
+                            0, consumptions, prices, 0, 0
+                        )
+                    else:
+                        total_consumption = consumption_rows[0]["sum"]
+                        total_cost = cost_rows[0]["sum"]
+                        last_ts = cost_rows[0]["start"]
+                        c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
+                            last_ts, consumptions, prices, total_consumption, total_cost
+                        )
 
                 _LOGGER.info(
                     "Inserting statistics: %d consumption, %d cost records",
