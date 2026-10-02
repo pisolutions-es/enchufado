@@ -5,6 +5,7 @@ Statistics handling and data persistence derived from pvpc_energy by yinyang17
 """
 import datetime
 import logging
+import os
 from functools import partial
 from os.path import exists
 from typing import Any, Awaitable, Callable
@@ -112,10 +113,16 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
         EnchufadoCoordinator.esios_token = config.get(CONF_ESIOS_TOKEN)
         if not EnchufadoCoordinator.esios_token:
+            # Health signal for the Repairs UI (esios_token_missing): without
+            # it the issue could never appear, since the REE client is only
+            # invoked when a token exists and only sets "auth"/"network".
+            REE.last_error = "no_token"
             _LOGGER.warning(
                 "No ESIOS API token configured — PVPC prices won't update. "
                 "Remove and re-add the Enchufado integration to set one."
             )
+        else:
+            REE.last_error = None
 
         EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
         EnchufadoCoordinator.energy_file = f"{EnchufadoCoordinator.user_files_path}/{ENERGY_FILENAME}"
@@ -140,7 +147,11 @@ class EnchufadoCoordinator:
             hass, EnchufadoCoordinator.energy_file
         )
         if consumptions:
-            c_stats, cost_stats = EnchufadoCoordinator.create_statistics(0, consumptions, prices, 0, 0)
+            # CPU-bound (~17k iterations for 2 years of hourly data): keep it
+            # off the event loop, like all the other file/recorder work.
+            c_stats, cost_stats = await hass.async_add_executor_job(
+                EnchufadoCoordinator.create_statistics, 0, consumptions, prices, 0, 0
+            )
             async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
             async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
@@ -228,8 +239,15 @@ class EnchufadoCoordinator:
                         last_stat[CONSUMPTION_STATISTIC_ID][0]["start"], datetime.UTC
                     ).date()
                 ):
-                    c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
-                        0, consumptions, prices, 0, 0
+                    # CPU-bound (~17k iterations for 2 years of hourly data):
+                    # keep it off the event loop, like the file I/O above.
+                    c_stats, cost_stats = await hass.async_add_executor_job(
+                        EnchufadoCoordinator.create_statistics,
+                        0,
+                        consumptions,
+                        prices,
+                        0,
+                        0,
                     )
                 else:
                     start = datetime.datetime.fromtimestamp(
@@ -248,8 +266,13 @@ class EnchufadoCoordinator:
                     total_consumption = stats[CONSUMPTION_STATISTIC_ID][0]["sum"]
                     total_cost = stats[COST_STATISTIC_ID][0]["sum"]
                     last_ts = stats[COST_STATISTIC_ID][0]["start"]
-                    c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
-                        last_ts, consumptions, prices, total_consumption, total_cost
+                    c_stats, cost_stats = await hass.async_add_executor_job(
+                        EnchufadoCoordinator.create_statistics,
+                        last_ts,
+                        consumptions,
+                        prices,
+                        total_consumption,
+                        total_cost,
                     )
 
                 _LOGGER.info(
@@ -320,20 +343,36 @@ class EnchufadoCoordinator:
         if not exists(file_path):
             return consumptions, prices
 
+        skipped = 0
         with open(file_path, "r") as f:
             has_reading_type = "reading_type" in f.readline()
             for line in f:
-                parts = line.rstrip("\n").split(",")
-                if has_reading_type:
-                    timestamp, consumption, price, reading_type = parts[-4:]
-                else:
-                    timestamp, consumption, price = parts[-3:]
-                    reading_type = ""
-                timestamp = int(timestamp)
-                if consumption not in ("", "-"):
-                    consumptions[timestamp] = {"value": float(consumption), "reading_type": reading_type}
-                if price not in ("", "-"):
-                    prices[timestamp] = float(price)
+                try:
+                    parts = line.rstrip("\n").split(",")
+                    if has_reading_type:
+                        timestamp, consumption, price, reading_type = parts[-4:]
+                    else:
+                        timestamp, consumption, price = parts[-3:]
+                        reading_type = ""
+                    timestamp = int(timestamp)
+                    if consumption not in ("", "-"):
+                        consumptions[timestamp] = {"value": float(consumption), "reading_type": reading_type}
+                    if price not in ("", "-"):
+                        prices[timestamp] = float(price)
+                except (ValueError, IndexError) as exc:
+                    # A truncated final line (crash mid-write of a pre-1.1.1
+                    # file) or any corrupted row must not brick every future
+                    # import: skip it and keep the rest of the history.
+                    skipped += 1
+                    _LOGGER.warning(
+                        "Skipping corrupted line in %s: %r (%s)", file_path, line.strip()[:120], exc
+                    )
+        if skipped:
+            _LOGGER.warning(
+                "%s: skipped %d corrupted line(s); import continues with the remaining history",
+                file_path,
+                skipped,
+            )
 
         if start_date and consumptions:
             timestamps = sorted(consumptions.keys())
@@ -371,9 +410,16 @@ class EnchufadoCoordinator:
         consumptions: dict[int, dict[str, Any]],
         prices: dict[int, float],
     ) -> None:
-        """Blocking: write the energy CSV file. Call via executor."""
+        """Blocking: atomically write the energy CSV file. Call via executor.
+
+        Writes to ``<file>.tmp`` and renames it into place after fsync: a
+        crash, power loss or OOM kill mid-write can no longer truncate the
+        existing ~2-year local history (which Datadis caps at 2 years and
+        CNMC refuses to re-price, i.e. it is not fully re-fetchable).
+        """
         timestamps = sorted(set(list(consumptions.keys()) + list(prices.keys())))
-        with open(file_path, "w") as f:
+        tmp_path = f"{file_path}.tmp"
+        with open(tmp_path, "w") as f:
             f.write("date,timestamp,consumption,price,reading_type\n")
             for ts in timestamps:
                 date = datetime.datetime.fromtimestamp(ts, MADRID_TZ).strftime("%d/%m/%Y %H")
@@ -382,6 +428,9 @@ class EnchufadoCoordinator:
                 reading_type = "" if c is None else c["reading_type"]
                 price = "" if ts not in prices else prices[ts]
                 f.write(f"{date},{ts},{consumption},{price},{reading_type}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, file_path)
 
     @staticmethod
     async def save_energy_data(

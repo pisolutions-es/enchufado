@@ -15,7 +15,8 @@ _TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15)
 class REE:
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
     # Health signal for the repair flows: None healthy, "auth" token rejected,
-    # "network" unreachable/malformed. Reset by the coordinator before each fetch cycle.
+    # "network" unreachable/malformed, "no_token" missing (set by the
+    # coordinator's set_config, cleared there when a token is configured).
     last_error: str | None = None
 
     @staticmethod

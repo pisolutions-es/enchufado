@@ -67,11 +67,18 @@ def _next_midnight() -> float:
 def _retry_delay(attempt: int, retry_after: str | None) -> float | None:
     """Seconds to wait before the next attempt; None means do not retry.
 
-    A Retry-After header wins (clamped to [1s, 1h]); otherwise exponential
-    backoff with jitter.
+    A Retry-After header wins (clamped to [1s, 1h]) but is ALSO capped by the
+    attempt budget: without this cap a server that keeps answering 429/5xx
+    with a Retry-After header would make the caller loop forever (each sleep
+    up to the 1 h clamp), permanently wedging the import task and the
+    ``import_running`` guard with it. After ``_MAX_RETRIES`` attempts the
+    caller returns the last status instead, which surfaces as a repair issue.
+    Otherwise: exponential backoff with jitter.
     """
     if retry_after:
         try:
+            if attempt >= _MAX_RETRIES:
+                return None
             return max(1.0, min(float(retry_after), 3600.0))
         except ValueError:
             pass  # HTTP-date form; fall back to exponential backoff

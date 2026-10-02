@@ -4,6 +4,64 @@ All notable changes to this fork are documented here. This fork is based on
 [Migux13/enchufado](https://github.com/Migux13/enchufado) (MIT); the v1.x
 releases build on this fork's own [1.0.0-fork](#100-fork--2026-09-17).
 
+## [1.1.1-fork] — 2026-10-02
+
+Robustness release from the critical code review of 2026-10-02
+(`REVIEW-CRITICAL-2026-10.md`): fixes the one availability bug that could
+silently stop all data collection, and the data-loss path that could destroy
+two years of cached history. No entity IDs, statistic IDs or config-entry
+data were changed: existing installations upgrade in place with no user
+action.
+
+### Fixed
+- **Unbounded `Retry-After` retry loop (CRITICAL-1)**: a Datadis 429/5xx that
+  kept carrying a `Retry-After` header made the client retry forever (each
+  sleep up to 1 hour), permanently wedging the import task — the
+  `import_running` guard never cleared, so every later trigger (daily 06:30
+  schedule, service calls, setup) was silently skipped until an HA restart.
+  The `Retry-After` branch is now capped by the same attempt budget as the
+  exponential-backoff branch; after `_MAX_RETRIES` attempts the request
+  returns its last status, the import cycle completes, the guard is released
+  and the failure surfaces as a repair issue (`datadis_quota_exhausted` for
+  persistent 429s, `datadis_unreachable` for 5xx).
+- **Non-atomic `energy_data.csv` writes (MAJOR-1, part 1)**: the file was
+  truncated in place before writing, so a crash/power loss/OOM kill mid-write
+  destroyed the entire ~2-year local history (not fully re-fetchable: Datadis
+  caps retrieval at 2 years and CNMC refuses old files). Writes now go to
+  `energy_data.csv.tmp`, are fsynced, and are moved into place with
+  `os.replace()`.
+- **Zero parse-error tolerance in `energy_data.csv` (MAJOR-1, part 2)**: a
+  truncated final line or any corrupted row raised out of the import task and
+  repeated on every cycle, silently importing nothing. Corrupted lines are now
+  skipped with a warning (including a per-file summary count) and the import
+  continues with the remaining history.
+- **`esios_token_missing` repair issue was unreachable (MAJOR-3)**: nothing
+  ever set `REE.last_error = "no_token"`, so the shipped `esios_token_missing`
+  issue could never appear in the Repairs UI (the 1.1.0-fork CHANGELOG claim
+  about "missing" ESIOS tokens becoming repair issues only becomes true with
+  this release). `set_config()` now sets the signal when no ESIOS token is
+  configured and clears it when one exists.
+- **Statistics rebuild stalled the event loop (MAJOR-5)**: the ~17,000-
+  iteration (2 years hourly) `create_statistics()` loop ran synchronously on
+  the event loop, stalling it ~100–400 ms per rebuild. It touches no async HA
+  APIs, so all three call sites (full rebuild and incremental resume in the
+  import cycle, plus the reprocess service) now run it via
+  `hass.async_add_executor_job`.
+
+### Added
+- Regression tests for the four fixes: bounded retries with `Retry-After`
+  (request + login, 429 and 5xx), atomic-write crash simulation, corrupted/
+  truncated/blank-line CSV parsing, the `no_token` repair wiring, and
+  executor-routing of the statistics rebuild
+  (`tests/test_retry_bounded.py`, `tests/test_csv_robustness.py`,
+  `tests/test_esios_token_missing.py`, `tests/test_statistics_off_loop.py`,
+  plus `tests/test_fixes_offline.py`, a stdlib-unittest variant runnable
+  without homeassistant installed).
+
+[1.1.1-fork]: https://github.com/pisolutions-es/enchufado/releases/tag/v1.1.1-fork
+[1.1.0-fork]: https://github.com/pisolutions-es/enchufado/releases/tag/v1.1.0-fork
+[1.0.0-fork]: https://github.com/pisolutions-es/enchufado/releases/tag/v1.0.0-fork
+
 ## [1.1.0-fork] — 2026-09-18
 
 Hardening release from the v1.1.0 audit: calendar correctness, import
@@ -112,6 +170,3 @@ upgrade in place with no user action.
 - If Datadis keeps answering "too many requests", the integration now waits
   until the quota resets instead of hammering the API; check the logs for the
   "daily quota" warning.
-
-[1.1.0-fork]: https://github.com/pisolutions-es/enchufado/releases/tag/v1.1.0-fork
-[1.0.0-fork]: https://github.com/pisolutions-es/enchufado/releases/tag/v1.0.0-fork
