@@ -11,6 +11,24 @@ _LOGGER = logging.getLogger(__name__)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15)
 
+_session: aiohttp.ClientSession | None = None
+
+
+async def _get_session() -> aiohttp.ClientSession:
+    """Shared ClientSession (connection pool reused across import cycles)."""
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession()
+    return _session
+
+
+async def close_session() -> None:
+    """Close the shared session; called on integration unload."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+    _session = None
+
 
 class REE:
     _url = "https://api.esios.ree.es/indicators/1001?geo_ids[]=8741&start_date={start_date}&end_date={end_date}"
@@ -43,18 +61,18 @@ class REE:
         )
         response = None
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.get(url, headers=REE._headers(token)) as resp:
-                    if resp.status == 200:
-                        try:
-                            response = await resp.json(content_type=None)
-                        except ValueError:
-                            _LOGGER.warning("REE.pvpc: 200 with non-JSON body")
-                            return None
-                    else:
-                        _LOGGER.warning("REE.pvpc: unexpected status %s", resp.status)
-                        REE.last_error = "auth" if resp.status in (401, 403) else "network"
+            session = await _get_session()
+            async with session.get(url, headers=REE._headers(token), timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    try:
+                        response = await resp.json(content_type=None)
+                    except ValueError:
+                        _LOGGER.warning("REE.pvpc: 200 with non-JSON body")
                         return None
+                else:
+                    _LOGGER.warning("REE.pvpc: unexpected status %s", resp.status)
+                    REE.last_error = "auth" if resp.status in (401, 403) else "network"
+                    return None
         except (aiohttp.ClientError, TimeoutError) as err:
             _LOGGER.warning("REE.pvpc request failed: %s", err)
             REE.last_error = "network"

@@ -1,14 +1,14 @@
 {
   "domain": "enchufado",
   "name": "Enchufado — PVPC vía Datadis",
-  "codeowners": ["@Migux13"],
+  "codeowners": ["@pisolutions-es"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "documentation": "https://github.com/Migux13/enchufado",
+  "documentation": "https://github.com/pisolutions-es/enchufado",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/Migux13/enchufado/issues",
+  "issue_tracker": "https://github.com/pisolutions-es/enchufado/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.1.1-fork"
+  "version": "1.2.0-fork"
 }

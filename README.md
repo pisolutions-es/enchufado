@@ -18,7 +18,7 @@ Enchufado comparte con pvpc_energy la arquitectura, los IDs de estadísticas y l
 - Descarga los precios horarios **PVPC** desde ESIOS/REE
 - Crea estadísticas en el **panel de energía** de Home Assistant: consumo (kWh) y coste (€)
 - Simula facturas mensuales usando el comparador oficial de la CNMC y publica el resultado como estado `enchufado.current_bill`
-- Se actualiza automáticamente cada día a las 6:30
+- Se actualiza automáticamente cada día a las 6:30 (con una ventana aleatoria de hasta 60 minutos para no cargar la API a la hora exacta)
 
 ## Requisitos
 
@@ -50,11 +50,17 @@ El proceso de configuración tiene dos pasos:
 
 Se muestran los suministros encontrados en tu cuenta. Al seleccionar uno, la potencia contratada y el código postal se obtienen automáticamente desde Datadis.
 
+### Cambiar credenciales más adelante
+
+No hace falta eliminar la integración: ve a **Ajustes → Dispositivos y servicios → Enchufado**, pulsa el icono del engranaje (**Configurar**) y vuelve a introducir tus credenciales de Datadis o el token de ESIOS-REE. Deja un campo vacío para conservar su valor actual; al guardar, la entrada se recarga automáticamente.
+
+La interfaz de configuración está disponible en español e inglés.
+
 ## Entidades creadas
 
 | Entidad | Tipo | Descripción |
 |---------|------|-------------|
-| `number.facturas_a_mostrar` | Slider (1–24) | Número de facturas que se incluyen en `enchufado.current_bill` |
+| `number.enchufado_facturas_a_mostrar` | Slider (1–24) | Número de facturas que se incluyen en `enchufado.current_bill` |
 
 ## Estadísticas del panel de energía
 
@@ -68,6 +74,8 @@ Ve a **Ajustes → Panel de energía** y añade:
 La entidad `enchufado.current_bill` contiene el importe de la última factura simulada y un atributo `bills` con el desglose de las N facturas más recientes (N se controla con el slider `Facturas a mostrar`).
 
 Cada factura incluye: importe total, coste de potencia, coste de energía, alquiler de contador e IVA.
+
+> **Nota de privacidad:** la simulación envía a comparador.cnmc.gob.es la curva horaria completa de consumo (incluyendo el CUPS) para los períodos facturados. No se envía ningún otro dato personal.
 
 ## Servicios disponibles
 

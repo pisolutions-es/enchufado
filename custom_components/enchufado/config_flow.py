@@ -3,6 +3,9 @@
 Two-step setup:
   1. Datadis credentials → authenticate + fetch supply list
   2. Select CUPS → auto-fetch contract (power values, postal code) → create entry
+
+An options flow allows re-entering the Datadis credentials (and the ESIOS
+token) without deleting and re-adding the integration.
 """
 import logging
 from typing import Any, Dict, Optional
@@ -10,6 +13,7 @@ from typing import Any, Dict, Optional
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -38,6 +42,16 @@ _AUTH_SCHEMA = vol.Schema(
     }
 )
 
+# All fields optional: a blank field keeps the value stored in the entry.
+_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_DATADIS_USER): cv.string,
+        vol.Optional(CONF_DATADIS_PASSWORD): selector({"Text": {"type": "password"}}),
+        vol.Optional(CONF_AUTHORIZED_NIF): cv.string,
+        vol.Optional(CONF_ESIOS_TOKEN): selector({"Text": {"type": "password"}}),
+    }
+)
+
 
 class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1  # config entry data schema; bump together with async_migrate_entry
@@ -47,6 +61,11 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._supplies: list[dict] = []
         self._token: str | None = None
         self.data: dict[str, Any] = {}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return EnchufadoOptionsFlow()
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None):
         errors = {}
@@ -127,3 +146,48 @@ class EnchufadoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=cups_value, data=self.data)
 
         return self.async_show_form(step_id="cups", data_schema=cups_schema, errors=errors)
+
+
+class EnchufadoOptionsFlow(config_entries.OptionsFlow):
+    """Re-enter Datadis credentials / ESIOS token without re-adding the entry.
+
+    Blank fields keep the currently stored value. Changed Datadis credentials
+    are validated against the real API before being saved; the ESIOS token
+    is validated on the next import cycle. Saving fires the entry's update
+    listener (__init__.options_update_listener), which reloads the entry so
+    the coordinator picks the new credentials immediately.
+    """
+
+    async def async_step_init(self, user_input=None):
+        errors = {}
+        current = self.config_entry.data
+
+        if user_input is not None:
+            username = (user_input.get(CONF_DATADIS_USER) or "").strip() or current.get(CONF_DATADIS_USER)
+            password = user_input.get(CONF_DATADIS_PASSWORD) or current.get(CONF_DATADIS_PASSWORD)
+            authorized_nif = (user_input.get(CONF_AUTHORIZED_NIF) or "").strip() or current.get(
+                CONF_AUTHORIZED_NIF
+            )
+            esios_token = (user_input.get(CONF_ESIOS_TOKEN) or "").strip() or current.get(CONF_ESIOS_TOKEN)
+
+            credentials_changed = username != current.get(CONF_DATADIS_USER) or (
+                password != current.get(CONF_DATADIS_PASSWORD)
+            )
+            if credentials_changed:
+                token = await async_login(username, password)
+                if token is None:
+                    errors["base"] = "cannot_connect"
+
+            if not errors:
+                data = dict(current)
+                data.update(
+                    {
+                        CONF_DATADIS_USER: username,
+                        CONF_DATADIS_PASSWORD: password,
+                        CONF_AUTHORIZED_NIF: authorized_nif,
+                        CONF_ESIOS_TOKEN: esios_token,
+                    }
+                )
+                return self.async_create_entry(title="", data=data)
+
+        return self.async_show_form(step_id="init", data_schema=_OPTIONS_SCHEMA, errors=errors)

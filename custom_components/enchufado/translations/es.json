@@ -30,10 +30,31 @@
       "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Credenciales de Enchufado",
+        "description": "Vuelve a introducir tus credenciales de Datadis o el token de ESIOS-REE. Deja un campo vacío para conservar su valor actual.",
+        "data": {
+          "datadis_user": "Usuario (NIF/NIE)",
+          "datadis_password": "Contraseña",
+          "authorized_nif": "NIF autorizado (opcional, si el CUPS está a nombre de otra persona)",
+          "esios_token": "Token API ESIOS-REE"
+        },
+        "data_description": {
+          "datadis_password": "Déjala vacía para conservar la contraseña actual. Si la cambias (o cambias el usuario), se hará un login de validación contra Datadis.",
+          "esios_token": "Déjalo vacío para conservar el token actual."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar a Datadis. Verifica usuario y contraseña."
+    }
+  },
   "issues": {
     "datadis_auth_failed": {
       "title": "Datadis rechazó las credenciales",
-      "description": "Datadis no acepta el usuario o la contraseña guardados (o el NIF autorizado). El consumo horario no se actualizará.\n\nVe a Ajustes → Dispositivos y servicios → Enchufado → Configura y vuelve a introducir tus credenciales de datadis.es."
+      "description": "Datadis no acepta el usuario o la contraseña guardados (o el NIF autorizado). El consumo horario no se actualizará.\n\nVe a Ajustes → Dispositivos y servicios → Enchufado, pulsa en ⚙️ **Configurar** y vuelve a introducir tus credenciales de datadis.es (no hace falta eliminar la integración)."
     },
     "datadis_quota_exhausted": {
       "title": "Cuota diaria de Datadis agotada",
@@ -45,11 +66,11 @@
     },
     "esios_token_rejected": {
       "title": "ESIOS-REE rechazó el token",
-      "description": "La API de ESIOS-REE está devolviendo un error de autenticidad para el token configurado. Los precios PVPC no se actualizarán.\n\nSolicita un token nuevo por email a ESIOS y actualízalo eliminando y volviendo a añadir la integración."
+      "description": "La API de ESIOS-REE está devolviendo un error de autenticidad para el token configurado. Los precios PVPC no se actualizarán.\n\nSolicita un token nuevo por email a ESIOS e introdúcelo desde Ajustes → Dispositivos y servicios → Enchufado → ⚙️ **Configurar**."
     },
     "esios_token_missing": {
       "title": "Falta el token de ESIOS-REE",
-      "description": "La integración no tiene token de la API ESIOS-REE, así que los precios PVPC no se descargan ni se calculan los costes.\n\nSolicita un token personal gratuito por email a ESIOS y configura la integración de nuevo."
+      "description": "La integración no tiene token de la API ESIOS-REE, así que los precios PVPC no se descargan ni se calculan los costes.\n\nSolicita un token personal gratuito por email a ESIOS e introdúcelo desde Ajustes → Dispositivos y servicios → Enchufado → ⚙️ **Configurar**."
     },
     "esios_unreachable": {
       "title": "ESIOS-REE no responde",
