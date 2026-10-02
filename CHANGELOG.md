@@ -4,6 +4,61 @@ All notable changes to this fork are documented here. This fork is based on
 [Migux13/enchufado](https://github.com/Migux13/enchufado) (MIT); the v1.x
 releases build on this fork's own [1.0.0-fork](#100-fork--2026-09-17).
 
+## [1.2.0-fork] — 2026-10-02
+
+Second fix pass from the REVIEW-CRITICAL-2026-10 audit (the CRITICAL-1 and
+MAJOR-1/3/5 findings were fixed in 1.1.1-fork). No entity IDs, statistic IDs
+or config-entry data were changed: existing installations upgrade in place
+with no user action.
+
+### Added
+- **Options flow for credentials**: the `datadis_auth_failed` repair issue
+  now points at a flow that actually exists. Go to Settings → Devices &
+  Services → Enchufado → ⚙️ Configure to re-enter the Datadis
+  username/password (validated against the API before saving), the
+  authorized NIF or the ESIOS-REE token — no need to delete and re-add the
+  integration. Blank fields keep the stored value; saving reloads the entry
+  automatically. `esios_token_rejected` and `esios_token_missing` copy
+  updated accordingly.
+- **Complete English translations** (`translations/en.json`): the setup
+  wizard, the options flow and every repair issue are now available in
+  English. `strings.json` is now the canonical English source (it
+  previously mixed a Spanish wizard with English repair copy); `es.json`
+  carries the full Spanish set.
+
+### Changed
+- **REE and CNMC reuse one shared aiohttp session** instead of opening a
+  short-lived `ClientSession` per request (a force import used to open ~26
+  REE sessions plus up to 5 CNMC ones). Timeouts are unchanged and the
+  sessions are closed on integration unload.
+- `manifest.json` now points `documentation`, `issue_tracker` and
+  `codeowners` at the pisolutions-es fork (upstream remains credited in
+  `FORK-NOTE.md`, `NOTICE` and the source headers).
+
+### Fixed
+- **Statistics-resume hardening (MAJOR-2)**: the incremental-resume fast
+  path no longer raises when the recorder returns an empty
+  `get_last_statistics` payload or no rows from
+  `statistics_during_period` — it falls back to the full-history rebuild
+  instead of crashing the import cycle. The branch is now covered by
+  behavior tests: resume from the recorder's last point, the float-epoch
+  `start` contract, both nothing-to-resume fallbacks and the
+  UTC/Madrid date-mismatch (day-boundary) rebuild.
+- **README accuracy**: the number entity is
+  `number.enchufado_facturas_a_mostrar` (the documented
+  `number.facturas_a_mostrar` does not exist); the daily schedule is
+  documented as 6:30 plus a 0–60 min jitter; and the privacy note spells
+  out that the CNMC simulation uploads the full hourly consumption curve
+  (including the CUPS) to comparador.cnmc.gob.es.
+
+### Notes for users of the fork
+- Existing entries need no action. To change credentials from now on, use
+  the gear icon on the Enchufado card instead of deleting the integration.
+- The offline test suite (stdlib `unittest`, no homeassistant needed)
+  grew to 29 tests: `python3 -m unittest tests.test_pass2_offline -v`.
+  The repo-style pytest suite requires pytest-homeassistant-custom-component
+  and runs on CI hosts only.
+
 ## [1.1.0-fork] — 2026-09-18
 
 Hardening release from the v1.1.0 audit: calendar correctness, import

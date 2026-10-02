@@ -809,6 +809,9 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(self.manifest["domain"], "enchufado")
         self.assertEqual(self.manifest["dependencies"], ["recorder"])
 
+    def test_version_is_1_2_0_fork(self):
+        self.assertEqual(self.manifest["version"], "1.2.0-fork")
+
 
 if __name__ == "__main__":
     unittest.main()

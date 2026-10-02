@@ -50,6 +50,12 @@ El proceso de configuración tiene dos pasos:
 
 Se muestran los suministros encontrados en tu cuenta. Al seleccionar uno, la potencia contratada y el código postal se obtienen automáticamente desde Datadis.
 
+### Cambiar credenciales más adelante
+
+No hace falta eliminar la integración: ve a **Ajustes → Dispositivos y servicios → Enchufado**, pulsa el icono del engranaje (**Configurar**) y vuelve a introducir tus credenciales de Datadis o el token de ESIOS-REE. Deja un campo vacío para conservar su valor actual; al guardar, la entrada se recarga automáticamente.
+
+La interfaz de configuración está disponible en español e inglés.
+
 ## Entidades creadas
 
 | Entidad | Tipo | Descripción |
