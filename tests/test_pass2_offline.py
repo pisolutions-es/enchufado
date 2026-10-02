@@ -17,7 +17,9 @@ Coverage:
   MINOR-3  shared aiohttp session reuse in ree.py / cnmc.py.
   MINOR-9/10/11  README entity id, complete en.json, manifest provenance.
 """
+import asyncio
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -570,6 +572,201 @@ class OptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(hasattr(config_flow.EnchufadoConfigFlow, "async_get_options_flow"))
         flow = config_flow.EnchufadoConfigFlow.async_get_options_flow(None)
         self.assertIsInstance(flow, config_flow.EnchufadoOptionsFlow)
+
+
+# ---------------------------------------------------------------------------
+# MINOR-10: complete i18n (en.json) — strings.json is the English source
+# ---------------------------------------------------------------------------
+_COMPONENT = os.path.join(_ROOT, "custom_components", "enchufado")
+
+
+def _load_json(rel):
+    with open(os.path.join(_COMPONENT, rel), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _all_keys(node, prefix=()):
+    """Every leaf path of a nested dict as tuples."""
+    for k, v in node.items():
+        if isinstance(v, dict):
+            yield from _all_keys(v, prefix + (k,))
+        else:
+            yield prefix + (k,)
+
+
+class I18nTests(unittest.TestCase):
+    def setUp(self):
+        self.strings = _load_json("strings.json")
+        self.en = _load_json(os.path.join("translations", "en.json"))
+        self.es = _load_json(os.path.join("translations", "es.json"))
+
+    def test_files_are_valid_json(self):
+        self.assertIsInstance(self.strings, dict)
+        self.assertIsInstance(self.en, dict)
+        self.assertIsInstance(self.es, dict)
+
+    def test_en_json_covers_every_strings_key(self):
+        missing = set(_all_keys(self.strings)) - set(_all_keys(self.en))
+        self.assertEqual(missing, set())
+
+    def test_es_json_covers_every_strings_key(self):
+        missing = set(_all_keys(self.strings)) - set(_all_keys(self.es))
+        self.assertEqual(missing, set())
+
+    def test_config_flow_is_english_in_strings_json(self):
+        # MINOR-10: the setup wizard must not be Spanish-only in the source.
+        step = self.strings["config"]["step"]["user"]
+        self.assertNotIn("Contraseña", json.dumps(step))
+
+    def test_options_flow_strings_exist(self):
+        for lang, name in ((self.strings, "strings"), (self.en, "en"), (self.es, "es")):
+            self.assertIn("init", lang["options"]["step"], name)
+            self.assertIn("cannot_connect", lang["options"]["error"], name)
+
+    def test_repair_copy_points_at_the_options_flow(self):
+        # MAJOR-4 follow-through: no more dead-end instructions.
+        for lang in (self.strings, self.en, self.es):
+            desc = lang["issues"]["datadis_auth_failed"]["description"]
+            self.assertTrue("Configure" in desc or "Configurar" in desc, desc)
+            self.assertNotIn("re-add the integration", desc)
+            self.assertNotIn("volviendo a añadir la integración", desc)
+
+
+# ---------------------------------------------------------------------------
+# MINOR-3: shared aiohttp session reuse in ree.py / cnmc.py
+# ---------------------------------------------------------------------------
+class _SessionManagerStub:
+    """Replaces aiohttp.ClientSession(...) — counts instantiations."""
+
+    def __init__(self, session):
+        self._session = session
+        self.created = 0
+        self.timeouts = []
+
+    def __call__(self, *args, **kwargs):
+        self.created += 1
+        if "timeout" in kwargs:
+            self.timeouts.append(kwargs["timeout"])
+        return self._session
+
+
+def _install_session_manager(module):
+    """Point module.aiohttp.ClientSession at a stub; returns (manager, restore)."""
+    manager = _SessionManagerStub(FakeSession([], []))
+    orig = module.aiohttp.ClientSession
+    module.aiohttp.ClientSession = manager
+
+    def restore():
+        module.aiohttp.ClientSession = orig
+
+    return manager, restore
+
+
+def _ree_routes():
+    """A minimal valid ESIOS payload routed by method+regex."""
+    payload = {"indicator": {"values": [{"datetime": "2026-03-01T00:00:00+01:00", "value": 100.0}]}}
+    return [route("GET", r"esios\.ree\.es.*", FakeResponse(200, json_data=payload))]
+
+
+def _cnmc_fixtures():
+    period = {
+        "start_date": DAY1,
+        "end_date": DAY2,
+        "power_high": 4.6,
+        "power_low": 4.6,
+    }
+    consumptions = {ts: 0.5 for ts in (*_day_hours(DAY1, 0.5), *_day_hours(DAY2, 0.5))}
+    bill_payload = {
+        "graficoGastoTotalActual": {
+            "importeTotal": 50.0,
+            "importePotencia": 10.0,
+            "importeEnergia": 30.0,
+            "importeAlquiler": 1.0,
+            "importeIVA": 9.0,
+        },
+        "graficaConsumoDiario": {
+            "consumosDiarios": [{"fecha": "01/03/2026"}, {"fecha": "02/03/2026"}]
+        },
+    }
+    return period, consumptions, bill_payload
+
+
+class SessionReuseTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._restores = []
+
+    def tearDown(self):
+        for restore in self._restores:
+            restore()
+        # Drop the module-level sessions between tests.
+        asyncio.run(ree.close_session())
+        asyncio.run(cnmc.close_session())
+
+    def test_ree_reuses_shared_session(self):
+        manager, restore = _install_session_manager(ree)
+        self._restores.append(restore)
+        manager._session._routes = _ree_routes()
+
+        async def twice():
+            await REE.pvpc(DAY1, DAY1, "tok")
+            await REE.pvpc(DAY2, DAY2, "tok")
+
+        asyncio.run(twice())
+        self.assertEqual(manager.created, 1)  # one session, two requests
+        # The per-request timeout still rides on every call.
+        calls = manager._session.calls
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertIs(call["kwargs"]["timeout"], ree._TIMEOUT)
+
+    async def test_ree_shared_session_survives_and_closes(self):
+        manager, restore = _install_session_manager(ree)
+        self._restores.append(restore)
+        manager._session._routes = _ree_routes()
+
+        await REE.pvpc(DAY1, DAY1, "tok")
+        await ree.close_session()
+        await REE.pvpc(DAY2, DAY2, "tok")
+
+        self.assertEqual(manager.created, 2)  # closed → a fresh session is built
+
+    async def test_ree_parses_prices_over_shared_session(self):
+        manager, restore = _install_session_manager(ree)
+        self._restores.append(restore)
+
+        manager._session._routes = _ree_routes()
+
+        prices = await REE.pvpc(DAY1, DAY1, "tok")
+
+        self.assertEqual(prices, {madrid_timestamp(DAY1): 0.1})  # MWh → €/kWh
+        self.assertIsNone(REE.last_error)
+
+    async def test_cnmc_reuses_shared_session(self):
+        manager, restore = _install_session_manager(cnmc)
+        self._restores.append(restore)
+        period, consumptions, bill_payload = _cnmc_fixtures()
+        manager._session._routes = [
+            route("POST", r"comparador\.cnmc\.gob\.es.*cargar.*", FakeResponse(200, text="file123-rest")),
+            route("GET", r"comparador\.cnmc\.gob\.es.*ofertas.*", FakeResponse(200, json_data=bill_payload)),
+        ]
+
+        async def twice():
+            p1 = dict(period)
+            await cnmc.calculate_bill(p1, "CUPS", consumptions, "28001")
+            p2 = dict(period)
+            await cnmc.calculate_bill(p2, "CUPS", consumptions, "28001")
+            return p1, p2
+
+        p1, p2 = await twice()
+
+        self.assertEqual(manager.created, 1)  # one session for both bill calls
+        # 2 uploads + 2 bill requests, each carrying the per-request timeout.
+        calls = manager._session.calls
+        self.assertEqual(len(calls), 4)
+        for call in calls:
+            self.assertIs(call["kwargs"]["timeout"], cnmc._TIMEOUT)
+        self.assertEqual(p1["total_cost"], 50.0)  # happy path still works
+        self.assertEqual(p2["total_cost"], 50.0)
 
 
 if __name__ == "__main__":
