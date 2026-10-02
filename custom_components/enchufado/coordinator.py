@@ -113,10 +113,16 @@ class EnchufadoCoordinator:
         EnchufadoCoordinator.zip_code = config.get(CONF_ZIP_CODE, "")
         EnchufadoCoordinator.esios_token = config.get(CONF_ESIOS_TOKEN)
         if not EnchufadoCoordinator.esios_token:
+            # Health signal for the Repairs UI (esios_token_missing): without
+            # it the issue could never appear, since the REE client is only
+            # invoked when a token exists and only sets "auth"/"network".
+            REE.last_error = "no_token"
             _LOGGER.warning(
                 "No ESIOS API token configured — PVPC prices won't update. "
                 "Remove and re-add the Enchufado integration to set one."
             )
+        else:
+            REE.last_error = None
 
         EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
         EnchufadoCoordinator.energy_file = f"{EnchufadoCoordinator.user_files_path}/{ENERGY_FILENAME}"
