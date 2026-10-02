@@ -30,6 +30,27 @@
       "cups_not_found": "El CUPS seleccionado no se encontró en la lista de suministros."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Credenciales de Enchufado",
+        "description": "Vuelve a introducir tus credenciales de Datadis o el token de ESIOS-REE. Deja un campo vacío para conservar su valor actual.",
+        "data": {
+          "datadis_user": "Usuario (NIF/NIE)",
+          "datadis_password": "Contraseña",
+          "authorized_nif": "NIF autorizado (opcional, si el CUPS está a nombre de otra persona)",
+          "esios_token": "Token API ESIOS-REE"
+        },
+        "data_description": {
+          "datadis_password": "Déjala vacía para conservar la contraseña actual. Si la cambias (o cambias el usuario), se hará un login de validación contra Datadis.",
+          "esios_token": "Déjalo vacío para conservar el token actual."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar a Datadis. Verifica usuario y contraseña."
+    }
+  },
   "issues": {
     "datadis_auth_failed": {
       "title": "Datadis rechazó las credenciales",
