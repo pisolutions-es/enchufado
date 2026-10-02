@@ -147,7 +147,11 @@ class EnchufadoCoordinator:
             hass, EnchufadoCoordinator.energy_file
         )
         if consumptions:
-            c_stats, cost_stats = EnchufadoCoordinator.create_statistics(0, consumptions, prices, 0, 0)
+            # CPU-bound (~17k iterations for 2 years of hourly data): keep it
+            # off the event loop, like all the other file/recorder work.
+            c_stats, cost_stats = await hass.async_add_executor_job(
+                EnchufadoCoordinator.create_statistics, 0, consumptions, prices, 0, 0
+            )
             async_add_external_statistics(hass, EnchufadoCoordinator.consumption_metadata, c_stats)
             async_add_external_statistics(hass, EnchufadoCoordinator.cost_metadata, cost_stats)
 
@@ -235,8 +239,15 @@ class EnchufadoCoordinator:
                         last_stat[CONSUMPTION_STATISTIC_ID][0]["start"], datetime.UTC
                     ).date()
                 ):
-                    c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
-                        0, consumptions, prices, 0, 0
+                    # CPU-bound (~17k iterations for 2 years of hourly data):
+                    # keep it off the event loop, like the file I/O above.
+                    c_stats, cost_stats = await hass.async_add_executor_job(
+                        EnchufadoCoordinator.create_statistics,
+                        0,
+                        consumptions,
+                        prices,
+                        0,
+                        0,
                     )
                 else:
                     start = datetime.datetime.fromtimestamp(
@@ -255,8 +266,13 @@ class EnchufadoCoordinator:
                     total_consumption = stats[CONSUMPTION_STATISTIC_ID][0]["sum"]
                     total_cost = stats[COST_STATISTIC_ID][0]["sum"]
                     last_ts = stats[COST_STATISTIC_ID][0]["start"]
-                    c_stats, cost_stats = EnchufadoCoordinator.create_statistics(
-                        last_ts, consumptions, prices, total_consumption, total_cost
+                    c_stats, cost_stats = await hass.async_add_executor_job(
+                        EnchufadoCoordinator.create_statistics,
+                        last_ts,
+                        consumptions,
+                        prices,
+                        total_consumption,
+                        total_cost,
                     )
 
                 _LOGGER.info(
