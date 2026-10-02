@@ -769,5 +769,27 @@ class SessionReuseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p2["total_cost"], 50.0)
 
 
+# ---------------------------------------------------------------------------
+# MINOR-9: README accuracy (entity id, schedule jitter, CNMC disclosure)
+# ---------------------------------------------------------------------------
+class ReadmeTests(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(_ROOT, "README.md"), encoding="utf-8") as f:
+            self.readme = f.read()
+
+    def test_number_entity_id_matches_ha_generation(self):
+        # has_entity_name + device "Enchufado" → number.enchufado_facturas_a_mostrar
+        self.assertIn("number.enchufado_facturas_a_mostrar", self.readme)
+        self.assertNotIn("`number.facturas_a_mostrar`", self.readme)
+
+    def test_schedule_documents_the_jitter(self):
+        self.assertIn("6:30", self.readme)
+        self.assertIn("60 minutos", self.readme)
+
+    def test_cnmc_upload_is_disclosed(self):
+        self.assertIn("comparador.cnmc.gob.es", self.readme)
+        self.assertIn("CUPS", self.readme)
+
+
 if __name__ == "__main__":
     unittest.main()
