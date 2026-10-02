@@ -791,5 +791,24 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("CUPS", self.readme)
 
 
+# ---------------------------------------------------------------------------
+# MINOR-11: fork provenance in manifest.json
+# ---------------------------------------------------------------------------
+class ManifestTests(unittest.TestCase):
+    def setUp(self):
+        self.manifest = _load_json("manifest.json")
+
+    def test_docs_and_tracker_point_at_the_fork(self):
+        self.assertIn("pisolutions-es/enchufado", self.manifest["documentation"])
+        self.assertIn("pisolutions-es/enchufado", self.manifest["issue_tracker"])
+        self.assertEqual(self.manifest["codeowners"], ["@pisolutions-es"])
+
+    def test_required_keys_still_present(self):
+        for key in ("domain", "name", "version", "codeowners", "config_flow", "iot_class", "dependencies"):
+            self.assertIn(key, self.manifest)
+        self.assertEqual(self.manifest["domain"], "enchufado")
+        self.assertEqual(self.manifest["dependencies"], ["recorder"])
+
+
 if __name__ == "__main__":
     unittest.main()
