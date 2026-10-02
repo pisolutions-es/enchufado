@@ -33,7 +33,7 @@
   "issues": {
     "datadis_auth_failed": {
       "title": "Datadis rejected the stored credentials",
-      "description": "Datadis does not accept the saved username/password (or authorized NIF). Hourly consumption will not update.\n\nGo to Settings → Devices & Services → Enchufado → Configure and re-enter your datadis.es credentials."
+      "description": "Datadis does not accept the saved username/password (or authorized NIF). Hourly consumption will not update.\n\nGo to Settings → Devices & Services → Enchufado, press the gear icon (**Configure**) and re-enter your datadis.es credentials (no need to delete the integration)."
     },
     "datadis_quota_exhausted": {
       "title": "Datadis daily quota exhausted",
@@ -45,11 +45,11 @@
     },
     "esios_token_rejected": {
       "title": "ESIOS-REE rejected the API token",
-      "description": "The ESIOS-REE API returns an authentication error for the configured token. PVPC prices will not update.\n\nRequest a new token from ESIOS by email and re-add the integration to store it."
+      "description": "The ESIOS-REE API returns an authentication error for the configured token. PVPC prices will not update.\n\nRequest a new token from ESIOS by email and enter it under Settings → Devices & Services → Enchufado → ⚙️ **Configure**."
     },
     "esios_token_missing": {
       "title": "ESIOS-REE API token missing",
-      "description": "The integration has no ESIOS-REE API token, so PVPC prices and cost statistics are not generated.\n\nRequest a free personal token from ESIOS by email and configure the integration again."
+      "description": "The integration has no ESIOS-REE API token, so PVPC prices and cost statistics are not generated.\n\nRequest a free personal token from ESIOS by email and enter it under Settings → Devices & Services → Enchufado → ⚙️ **Configure**."
     },
     "esios_unreachable": {
       "title": "ESIOS-REE is unreachable",

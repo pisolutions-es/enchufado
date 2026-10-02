@@ -33,7 +33,7 @@
   "issues": {
     "datadis_auth_failed": {
       "title": "Datadis rechazó las credenciales",
-      "description": "Datadis no acepta el usuario o la contraseña guardados (o el NIF autorizado). El consumo horario no se actualizará.\n\nVe a Ajustes → Dispositivos y servicios → Enchufado → Configura y vuelve a introducir tus credenciales de datadis.es."
+      "description": "Datadis no acepta el usuario o la contraseña guardados (o el NIF autorizado). El consumo horario no se actualizará.\n\nVe a Ajustes → Dispositivos y servicios → Enchufado, pulsa en ⚙️ **Configurar** y vuelve a introducir tus credenciales de datadis.es (no hace falta eliminar la integración)."
     },
     "datadis_quota_exhausted": {
       "title": "Cuota diaria de Datadis agotada",
@@ -45,11 +45,11 @@
     },
     "esios_token_rejected": {
       "title": "ESIOS-REE rechazó el token",
-      "description": "La API de ESIOS-REE está devolviendo un error de autenticidad para el token configurado. Los precios PVPC no se actualizarán.\n\nSolicita un token nuevo por email a ESIOS y actualízalo eliminando y volviendo a añadir la integración."
+      "description": "La API de ESIOS-REE está devolviendo un error de autenticidad para el token configurado. Los precios PVPC no se actualizarán.\n\nSolicita un token nuevo por email a ESIOS e introdúcelo desde Ajustes → Dispositivos y servicios → Enchufado → ⚙️ **Configurar**."
     },
     "esios_token_missing": {
       "title": "Falta el token de ESIOS-REE",
-      "description": "La integración no tiene token de la API ESIOS-REE, así que los precios PVPC no se descargan ni se calculan los costes.\n\nSolicita un token personal gratuito por email a ESIOS y configura la integración de nuevo."
+      "description": "La integración no tiene token de la API ESIOS-REE, así que los precios PVPC no se descargan ni se calculan los costes.\n\nSolicita un token personal gratuito por email a ESIOS e introdúcelo desde Ajustes → Dispositivos y servicios → Enchufado → ⚙️ **Configurar**."
     },
     "esios_unreachable": {
       "title": "ESIOS-REE no responde",

@@ -83,7 +83,11 @@ def _install_stubs():
     const.UnitOfEnergy = _UnitOfEnergy
     const.Platform = _Platform
 
-    _module("homeassistant.core", HomeAssistant=type("HomeAssistant", (), {}))
+    _module(
+        "homeassistant.core",
+        HomeAssistant=type("HomeAssistant", (), {}),
+        callback=lambda f: f,
+    )
 
     recorder = _module("homeassistant.components.recorder", get_instance=lambda hass: hass)
     recorder.models = _module("homeassistant.components.recorder.models")
@@ -467,6 +471,105 @@ class TestFullRebuildFallback(ResumeTestsBase):
         # 2026-03-01 23:00 UTC has UTC-date 03-01 but Madrid-date 03-02:
         # mismatch → full rebuild with zero seeds.
         self.assertEqual(ctx["create_args"], (0, 0, 0))
+
+
+# ---------------------------------------------------------------------------
+# MAJOR-4: options flow for Datadis credentials
+# ---------------------------------------------------------------------------
+from custom_components.enchufado.const import (  # noqa: E402
+    CONF_AUTHORIZED_NIF,
+    CONF_CUPS,
+    CONF_DATADIS_PASSWORD,
+    CONF_DATADIS_USER,
+    CONF_DISTRIBUTOR_CODE,
+    CONF_ESIOS_TOKEN,
+    CONF_POINT_TYPE,
+)
+
+
+def _entry_data():
+    return {
+        CONF_DATADIS_USER: "old-user",
+        CONF_DATADIS_PASSWORD: "old-pass",
+        CONF_AUTHORIZED_NIF: None,
+        CONF_ESIOS_TOKEN: "old-token",
+        CONF_CUPS: "ES0012345678901234567890",
+        CONF_DISTRIBUTOR_CODE: "2",
+        CONF_POINT_TYPE: 1,
+    }
+
+
+class OptionsFlowTests(unittest.IsolatedAsyncioTestCase):
+    def _flow(self, data=None):
+        flow = config_flow.EnchufadoOptionsFlow()
+        flow.config_entry = types.SimpleNamespace(data=data if data is not None else _entry_data())
+        return flow
+
+    def setUp(self):
+        self._orig_login = config_flow.async_login
+        self.login_calls = []
+
+        async def fake_login(username, password):
+            self.login_calls.append((username, password))
+            return "tok" if password != "bad" else None
+
+        config_flow.async_login = fake_login
+        self.addCleanup(setattr, config_flow, "async_login", self._orig_login)
+
+    async def test_reentered_credentials_are_saved(self):
+        flow = self._flow()
+
+        result = await flow.async_step_init(
+            {CONF_DATADIS_USER: "new-user", CONF_DATADIS_PASSWORD: "new-pass"}
+        )
+
+        self.assertEqual(result["type"], "create_entry")
+        data = result["data"]
+        self.assertEqual(data[CONF_DATADIS_USER], "new-user")
+        self.assertEqual(data[CONF_DATADIS_PASSWORD], "new-pass")
+        # Keys not touched by the options flow survive untouched.
+        self.assertEqual(data[CONF_CUPS], "ES0012345678901234567890")
+        self.assertEqual(data[CONF_DISTRIBUTOR_CODE], "2")
+        self.assertEqual(data[CONF_POINT_TYPE], 1)
+        self.assertEqual(data[CONF_ESIOS_TOKEN], "old-token")
+        # Changed credentials were validated against the API before saving.
+        self.assertEqual(self.login_calls, [("new-user", "new-pass")])
+
+    async def test_bad_credentials_show_error_and_keep_entry(self):
+        flow = self._flow()
+
+        result = await flow.async_step_init(
+            {CONF_DATADIS_USER: "new-user", CONF_DATADIS_PASSWORD: "bad"}
+        )
+
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(result["errors"], {"base": "cannot_connect"})
+        # The stored entry data was not touched.
+        self.assertEqual(flow.config_entry.data[CONF_DATADIS_USER], "old-user")
+
+    async def test_blank_fields_keep_stored_values_without_login(self):
+        flow = self._flow()
+
+        result = await flow.async_step_init({})
+
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["data"], _entry_data())
+        self.assertEqual(self.login_calls, [])  # nothing changed → no API call
+
+    async def test_token_only_update_skips_datadis_login(self):
+        flow = self._flow()
+
+        result = await flow.async_step_init({CONF_ESIOS_TOKEN: "new-esios-token"})
+
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["data"][CONF_ESIOS_TOKEN], "new-esios-token")
+        self.assertEqual(self.login_calls, [])
+        self.assertEqual(result["data"][CONF_DATADIS_PASSWORD], "old-pass")
+
+    async def test_flow_registered_on_config_flow(self):
+        self.assertTrue(hasattr(config_flow.EnchufadoConfigFlow, "async_get_options_flow"))
+        flow = config_flow.EnchufadoConfigFlow.async_get_options_flow(None)
+        self.assertIsInstance(flow, config_flow.EnchufadoOptionsFlow)
 
 
 if __name__ == "__main__":
