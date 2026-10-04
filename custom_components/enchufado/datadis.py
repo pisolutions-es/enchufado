@@ -5,6 +5,7 @@ https://datadis.es/private-api without external library dependencies.
 """
 import asyncio
 import datetime
+import json
 import logging
 import math
 import random
@@ -140,6 +141,7 @@ async def _request(token: str, url: str, params: dict) -> tuple:
                     if delay is None:
                         if resp.status == 429:
                             _quota_blocked_until = _next_midnight()
+                            Datadis.persist_quota_state()
                             _LOGGER.warning(
                                 "Datadis: repeated 429 without Retry-After — "
                                 "assuming daily quota exhausted until %s",
@@ -297,6 +299,41 @@ class Datadis:
     # "network" (endpoint unreachable / repeated server errors).
     last_error: str | None = None
 
+    user_files_path: str = ""
+
+    @staticmethod
+    def _quota_state_path() -> str:
+        return f"{Datadis.user_files_path}/datadis_quota_state.json"
+
+    @staticmethod
+    def persist_quota_state() -> None:
+        """Persist the quota window so restarts/reloads don't re-burn quota."""
+        global _quota_blocked_until
+        if not Datadis.user_files_path:
+            return
+        try:
+            with open(Datadis._quota_state_path(), "w") as f:
+                json.dump({"blocked_until": _quota_blocked_until}, f)
+        except OSError as err:
+            _LOGGER.debug("Datadis: could not persist quota state: %s", err)
+
+    @staticmethod
+    def load_quota_state() -> None:
+        """Restore the quota window after a restart/reload."""
+        global _quota_blocked_until
+        if not Datadis.user_files_path:
+            return
+        try:
+            with open(Datadis._quota_state_path()) as f:
+                _quota_blocked_until = float(json.load(f).get("blocked_until", 0.0))
+        except (OSError, ValueError):
+            pass
+        if time.time() < _quota_blocked_until:
+            _LOGGER.info(
+                "Datadis: quota window restored, requests skipped until %s",
+                datetime.datetime.fromtimestamp(_quota_blocked_until, MADRID_TZ).isoformat(),
+            )
+
     @staticmethod
     def setup(username, password, cups, distributor_code, point_type, authorized_nif=None):
         Datadis.username = username
@@ -310,6 +347,9 @@ class Datadis:
 
     @staticmethod
     async def _ensure_token() -> bool:
+        if time.time() < _quota_blocked_until:
+            _LOGGER.debug("Datadis: quota window active, skipping login")
+            return False
         if Datadis._token:
             return True
         token = await async_login(Datadis.username, Datadis.password)

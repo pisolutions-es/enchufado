@@ -125,6 +125,8 @@ class EnchufadoCoordinator:
             REE.last_error = None
 
         EnchufadoCoordinator.user_files_path = hass.config.path(DOMAIN)
+        Datadis.user_files_path = EnchufadoCoordinator.user_files_path
+        Datadis.load_quota_state()
         EnchufadoCoordinator.energy_file = f"{EnchufadoCoordinator.user_files_path}/{ENERGY_FILENAME}"
         EnchufadoCoordinator.billing_periods_file = (
             f"{EnchufadoCoordinator.user_files_path}/{BILLING_PERIODS_FILENAME}"
