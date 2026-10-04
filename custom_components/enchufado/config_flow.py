@@ -46,9 +46,9 @@ _AUTH_SCHEMA = vol.Schema(
 _OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_DATADIS_USER): cv.string,
-        vol.Optional(CONF_DATADIS_PASSWORD): selector({"Text": {"type": "password"}}),
+        vol.Optional(CONF_DATADIS_PASSWORD): selector({"text": {"type": "password"}}),
         vol.Optional(CONF_AUTHORIZED_NIF): cv.string,
-        vol.Optional(CONF_ESIOS_TOKEN): selector({"Text": {"type": "password"}}),
+        vol.Optional(CONF_ESIOS_TOKEN): selector({"text": {"type": "password"}}),
     }
 )
 
